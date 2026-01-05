@@ -39,6 +39,23 @@ export default function RoomPage() {
   const [useBackCamera, setUseBackCamera] = useState(false); // Camera flip state
   const [isFilterOpen, setIsFilterOpen] = useState(false); // Filter menu toggle
   const [isWatchOpen, setIsWatchOpen] = useState(false); // Watch menu toggle
+  const [elapsedTime, setElapsedTime] = useState(0); // Call timer
+
+  // Format time helper
+  const formatTime = (seconds: number) => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (hrs > 0) {
+        return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  useEffect(() => {
+     const timer = setInterval(() => setElapsedTime(prev => prev + 1), 1000);
+     return () => clearInterval(timer);
+  }, []);
   
   // Need to store metadata about peers
   const peersRef = useRef<{peerId: string, peer: SimplePeer.Instance, name: string}[]>([]);
@@ -265,6 +282,15 @@ export default function RoomPage() {
                 <span className="text-sm font-mono opacity-70">ID: {roomId}</span>
                 <button onClick={copyId} className="hover:text-primary"><Copy className="w-4 h-4"/></button>
             </div>
+            
+             {/* Call Timer */}
+             <div className="pointer-events-auto bg-red-500/20 backdrop-blur px-3 py-1 rounded-full border border-red-500/50">
+                 <span className="text-sm font-mono font-medium text-white flex items-center gap-2">
+                     <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"/>
+                     {formatTime(elapsedTime)}
+                 </span>
+             </div>
+
             <div className="pointer-events-auto">
                <button onClick={() => setWatchMode(!watchMode)} className={cn("p-2 rounded-full backdrop-blur transition", watchMode ? "bg-primary text-white" : "bg-white/10 hover:bg-white/20")}>
                   {watchMode ? <LayoutGrid className="w-5 h-5"/> : <Play className="w-5 h-5"/>}
