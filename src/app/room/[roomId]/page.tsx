@@ -298,7 +298,41 @@ export default function RoomPage() {
   useEffect(() => {
     if(!socket || peersRef.current.length > 0 || !userNameParam) return; 
 
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
+    // Simplified media request with fallbacks
+    const getMedia = async () => {
+        try {
+            return await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        } catch (e) {
+            console.warn("No camera/mic found, trying audio only");
+            try {
+                return await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+            } catch (e2) {
+                 console.warn("No audio found either, joining as spectator");
+                 // Use a dummy stream canvas if needed, or just a null stream for logic?
+                 // SimplePeer NEEDS a stream or at least one track to initiate usually, 
+                 // OR we can join without stream but then we can't speak.
+                 // Let's create a silent audio track / black video track so SimplePeer doesn't crash.
+                 const ctx = new AudioContext();
+                 const osc = ctx.createOscillator();
+                 const dst = ctx.createMediaStreamDestination();
+                 osc.connect(dst);
+                 osc.start();
+                 const track = dst.stream.getAudioTracks()[0];
+                 // Create black video
+                 const canvas = document.createElement("canvas");
+                 canvas.width = 640; canvas.height = 480;
+                 const stream = canvas.captureStream();
+                 stream.addTrack(track);
+                 return stream;
+            }
+        }
+    };
+
+    getMedia().then(stream => {
+      // If we got a real video track, disable it by default as per existing logic (user joins with video OFF?)
+      // Original code: stream.getVideoTracks().forEach(t => t.enabled = false);
+      // Wait, original logic set video OFF by default? Line 302: t.enabled = false;
+      // If so, we honour that.
       stream.getVideoTracks().forEach(t => t.enabled = false); 
       setMyStream(stream);
       
