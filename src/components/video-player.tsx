@@ -70,6 +70,14 @@ export const VideoPlayer = ({ roomId, url }: { roomId: string, url: string }) =>
              socket.off("video-action", handleAction);
         }
     }, [socket]);
+
+    // Auto-play when URL changes (e.g. selecting search result)
+    useEffect(() => {
+        if (url) {
+            isRemoteUpdate.current = true;
+            setPlaying(true);
+        }
+    }, [url]);
     
     const handlePlay = () => {
         if (!isRemoteUpdate.current) {
