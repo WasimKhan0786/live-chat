@@ -40,6 +40,7 @@ export default function RoomPage() {
   const [isFilterOpen, setIsFilterOpen] = useState(false); // Filter menu toggle
   const [isWatchOpen, setIsWatchOpen] = useState(false); // Watch menu toggle
   const [elapsedTime, setElapsedTime] = useState(0); // Call timer
+  const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false); // Leave confirmation modal
 
   // Format time helper
   const formatTime = (seconds: number) => {
@@ -273,11 +274,13 @@ export default function RoomPage() {
   }
 
   const leaveRoom = () => {
-      if (window.confirm("Are you sure you want to leave the room?")) {
-          // Optional: Stop tracks before leaving
-          myStream?.getTracks().forEach(track => track.stop());
-          router.push('/');
-      }
+      setIsLeaveModalOpen(true);
+  };
+
+  const confirmLeave = () => {
+      // Optional: Stop tracks before leaving
+      myStream?.getTracks().forEach(track => track.stop());
+      router.push('/');
   };
 
   return (
@@ -443,6 +446,35 @@ export default function RoomPage() {
       
       {/* Sidebar */}
       <ChatSidebar roomId={Array.isArray(roomId) ? roomId[0] : (roomId || "")} isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
+       
+       {/* Custom Leave Confirmation Modal */}
+       {isLeaveModalOpen && (
+           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+               <div className="bg-[#1a1a24] border border-white/10 p-6 rounded-2xl shadow-2xl max-w-sm w-full mx-4 text-center space-y-4 animate-in zoom-in-95 duration-200">
+                   <div className="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center mx-auto text-red-500">
+                       <PhoneOff className="w-6 h-6" />
+                   </div>
+                   <div>
+                       <h3 className="text-xl font-semibold text-white">Leave Room?</h3>
+                       <p className="text-muted-foreground text-sm mt-1">Are you sure you want to end the call and leave this room?</p>
+                   </div>
+                   <div className="grid grid-cols-2 gap-3 pt-2">
+                       <button 
+                           onClick={() => setIsLeaveModalOpen(false)}
+                           className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white font-medium transition"
+                       >
+                           Cancel
+                       </button>
+                       <button 
+                           onClick={confirmLeave}
+                           className="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-medium transition shadow-lg shadow-red-500/20"
+                       >
+                           Leave Room
+                       </button>
+                   </div>
+               </div>
+           </div>
+       )}
     </div>
   );
 }
