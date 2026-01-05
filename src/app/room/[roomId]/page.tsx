@@ -54,6 +54,7 @@ export default function RoomPage() {
   const [isVoiceMenuOpen, setIsVoiceMenuOpen] = useState(false);
   const [hearMyself, setHearMyself] = useState(false); 
   const [notifications, setNotifications] = useState<{id: string, senderName: string, text: string}[]>([]);
+  const [peerFilters, setPeerFilters] = useState<Record<string, string>>({}); // Store remote filters
   const [showRoomParams, setShowRoomParams] = useState(true); // New state for room code modal
   
   // Search State
@@ -106,12 +107,19 @@ export default function RoomPage() {
         setIsBrowserOpen(true);
     };
 
+    // Filter Sync Listener
+    const handleFilterUpdate = (userId: string, filter: string) => {
+        setPeerFilters(prev => ({ ...prev, [userId]: filter }));
+    };
+
     socket.on("receive-message", handleNewMessage);
     socket.on("browser-update", handleBrowserUpdate);
+    socket.on("user-update-filter", handleFilterUpdate);
 
     return () => {
         socket.off("receive-message", handleNewMessage);
         socket.off("browser-update", handleBrowserUpdate);
+        socket.off("user-update-filter", handleFilterUpdate);
     }
   }, [socket]);
 
@@ -601,9 +609,16 @@ export default function RoomPage() {
       setIsLeaveModalOpen(true);
   };
 
-  const confirmLeave = () => {
-      myStream?.getTracks().forEach(track => track.stop());
-      router.push('/');
+  /* FILTER LOGIC */
+  const applyFilter = (filter: string) => {
+      setCurrentFilter(filter);
+      setPeerFilters(prev => ({ ...prev, [socket?.id || 'me']: filter })); // Optimistic update
+      
+      const room = Array.isArray(roomId) ? roomId[0] : (roomId || "");
+      if(socket && room) {
+          socket.emit("update-filter", filter, room);
+      }
+      setIsFilterOpen(false);
   };
 
   return (
@@ -643,8 +658,8 @@ export default function RoomPage() {
                         <VideoFeed stream={myStream} muted={true} isSelf={true} filter={currentFilter} name={userName || "You"} />
                     </div>
                     {streams.map((s) => (
-                        <div key={s.peerId} className="aspect-video relative">
-                             <VideoFeed stream={s.stream} name={s.name} />
+                        <div key={s.peerId} className="aspect-video relative shadow-2xl rounded-2xl overflow-hidden border border-white/10">
+                             <VideoFeed stream={s.stream} name={s.name} filter={peerFilters[s.peerId] || 'none'} />
                         </div>
                     ))}
                 </div>
@@ -673,7 +688,7 @@ export default function RoomPage() {
                     {videoOff ? <VideoOff className="w-4 h-4 md:w-5 md:h-5"/> : <Video className="w-4 h-4 md:w-5 md:h-5"/>}
                  </button>
 
-                 <button onClick={toggleCamera} className="p-2 md:p-4 rounded-full bg-white/10 hover:bg-white/20 transition flex-shrink-0 md:hidden">
+                 <button onClick={toggleCamera} className="p-2 md:p-4 rounded-full bg-white/10 hover:bg-white/20 transition flex-shrink-0">
                     <RefreshCw className="w-4 h-4 md:w-5 md:h-5"/>
                  </button>
                  
@@ -861,7 +876,7 @@ export default function RoomPage() {
                                {['none', 'smooth', 'vivid', 'bw', 'sepia', 'vintage', 'cyber', 'cool', 'warm', 'dim', 'invert'].map(f => (
                                    <button 
                                      key={f}
-                                     onClick={() => { setCurrentFilter(f); setIsFilterOpen(false); }}
+                                     onClick={() => applyFilter(f)}
                                      className={cn("px-2 py-1.5 text-xs rounded-md capitalize transition", currentFilter === f ? "bg-primary text-white" : "bg-white/5 hover:bg-white/10")}
                                    >
                                       {f === 'smooth' ? '✨ Smooth' : f}

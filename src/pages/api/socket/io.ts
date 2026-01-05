@@ -141,6 +141,11 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
         // data: { signal: any, to: string, from: string, userName?: string }
         io.to(data.to).emit("signal", { signal: data.signal, from: data.from, userName: data.userName });
       });
+      
+      // Filter Sync
+      socket.on("update-filter", (filter, roomId) => {
+          socket.broadcast.to(roomId).emit("user-update-filter", socket.id, filter);
+      });
     });
   }
   res.end();
