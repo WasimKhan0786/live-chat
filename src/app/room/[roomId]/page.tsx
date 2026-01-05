@@ -296,8 +296,14 @@ export default function RoomPage() {
   
   const toggleMute = () => {
       if(myStream) {
-          myStream.getAudioTracks()[0].enabled = !myStream.getAudioTracks()[0].enabled;
-          setMuted(!muted);
+          const audioTrack = myStream.getAudioTracks()[0];
+          if (audioTrack) {
+            audioTrack.enabled = !audioTrack.enabled;
+            setMuted(!muted);
+          }
+      } else {
+          // Fallback if stream isn't ready
+          console.warn("Audio stream not ready");
       }
   }
   
