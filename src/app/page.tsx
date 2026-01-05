@@ -146,8 +146,10 @@ export default function Home() {
       </div>
 
       
-      <div className="absolute bottom-4 text-center text-xs text-muted-foreground/40 font-mono">
-         Developed by Wasim Khan • Siwan, Bihar
+      <div className="absolute bottom-4 text-center text-xs font-mono animate-pulse">
+         <span className="bg-clip-text text-transparent bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 font-bold">
+            Developed by Wasim Khan • Siwan, Bihar
+         </span>
       </div>
     </div>
   );
