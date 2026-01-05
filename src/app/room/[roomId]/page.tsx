@@ -10,7 +10,7 @@ import { VideoFeed } from "@/components/video-feed";
 import { VideoPlayer } from "@/components/video-player"; // We haven't created this file yet, but I will next.
 import { cn } from "@/lib/utils";
 
-import { Wand2, RefreshCw } from "lucide-react"; // Import Wand and Refresh icons
+import { Wand2, RefreshCw, Mic2 } from "lucide-react"; // Import Wand, Refresh, and Mic2 icons
 // Create a Placeholder for VideoPlayer until I write it, to avoid errors if I missed it.
 // Actually I better write VideoPlayer first? No, I can write valid import.
 
