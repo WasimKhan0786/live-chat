@@ -10,6 +10,7 @@ import { VideoFeed } from "@/components/video-feed";
 import { VideoPlayer } from "@/components/video-player"; // We haven't created this file yet, but I will next.
 import { cn } from "@/lib/utils";
 
+import { Wand2 } from "lucide-react"; // Import Wand icon for filters
 // Create a Placeholder for VideoPlayer until I write it, to avoid errors if I missed it.
 // Actually I better write VideoPlayer first? No, I can write valid import.
 
@@ -30,6 +31,7 @@ export default function RoomPage() {
   const [muted, setMuted] = useState(false);
   const [videoOff, setVideoOff] = useState(true); // Camera starts OFF by default to prevent "pop-up" feeling
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [currentFilter, setCurrentFilter] = useState("none"); // Filter state
   
   const peersRef = useRef<{peerId: string, peer: SimplePeer.Instance}[]>([]);
   
@@ -218,7 +220,7 @@ export default function RoomPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4 w-full h-full content-center p-2 md:p-4 overflow-y-auto">
                     {/* Self */}
                     <div className="aspect-video relative">
-                        <VideoFeed stream={myStream} muted={true} isSelf={true} />
+                        <VideoFeed stream={myStream} muted={true} isSelf={true} filter={currentFilter} />
                     </div>
                     {/* Peers */}
                     {streams.map((s) => (
@@ -233,7 +235,7 @@ export default function RoomPage() {
             {watchMode && (
                  <div className="absolute bottom-24 left-4 right-4 h-32 flex gap-2 overflow-x-auto p-2 no-scrollbar pointer-events-auto z-10">
                     <div className="h-full aspect-video min-w-[160px] relative shadow-lg ring-1 ring-white/10 rounded-lg overflow-hidden">
-                        <VideoFeed stream={myStream} muted={true} isSelf={true} />
+                        <VideoFeed stream={myStream} muted={true} isSelf={true} filter={currentFilter} />
                     </div>
                     {streams.map((s) => (
                         <div key={s.peerId} className="h-full aspect-video min-w-[160px] relative shadow-lg ring-1 ring-white/10 rounded-lg overflow-hidden">
@@ -274,6 +276,25 @@ export default function RoomPage() {
                         <button onClick={startWatchParty} className="bg-primary text-xs px-2 py-1 rounded">Go</button>
                     </div>
                  </div>
+             </div>
+
+
+             {/* Filter Button Popover */}
+             <div className="relative group">
+                  <button className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", currentFilter !== 'none' ? "bg-purple-600 text-white shadow-lg shadow-purple-500/30" : "bg-white/10 hover:bg-white/20")}>
+                     <Wand2 className="w-5 h-5"/>
+                  </button>
+                  <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-64 bg-[#1a1a24] border border-white/10 p-3 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 grid grid-cols-2 gap-2">
+                       {['none', 'smooth', 'vivid', 'bw', 'sepia', 'vintage', 'cyber', 'cool', 'warm', 'dim'].map(f => (
+                           <button 
+                             key={f}
+                             onClick={() => setCurrentFilter(f)}
+                             className={cn("px-2 py-1.5 text-xs rounded-md capitalize transition", currentFilter === f ? "bg-primary text-white" : "bg-white/5 hover:bg-white/10")}
+                           >
+                              {f === 'smooth' ? '✨ Smooth' : f}
+                           </button>
+                       ))}
+                  </div>
              </div>
 
              <button onClick={() => setIsChatOpen(!isChatOpen)} className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", isChatOpen ? "bg-primary shadow-lg shadow-primary/20" : "bg-white/10 hover:bg-white/20")}>
