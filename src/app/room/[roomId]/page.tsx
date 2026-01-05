@@ -635,8 +635,11 @@ export default function RoomPage() {
                     <VideoPlayer roomId={Array.isArray(roomId) ? roomId[0] : (roomId || "")} url={activeUrl} />
                 </div>
             ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4 w-full h-full content-center p-2 md:p-4 overflow-y-auto">
-                    <div className="aspect-video relative">
+                <div className={cn(
+                    "grid gap-3 md:gap-4 w-full h-full content-center p-2 md:p-4 overflow-y-auto",
+                    (streams.length + 1) >= 3 ? "grid-cols-2 sm:grid-cols-2 lg:grid-cols-3" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 pl-12 pr-12 md:px-4"
+                )}>
+                    <div className="aspect-video relative shadow-2xl rounded-2xl overflow-hidden border border-white/10">
                         <VideoFeed stream={myStream} muted={true} isSelf={true} filter={currentFilter} name={userName || "You"} />
                     </div>
                     {streams.map((s) => (
