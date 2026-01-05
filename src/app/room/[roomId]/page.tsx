@@ -302,7 +302,10 @@ export default function RoomPage() {
       stream.getVideoTracks().forEach(t => t.enabled = false); 
       setMyStream(stream);
       
-      socket.emit("join-room", roomId as string, socket.id, userNameParam, sessionId);
+      // Sanitize roomId to ensure string
+      const room = Array.isArray(roomId) ? roomId[0] : (roomId || "");
+
+      socket.emit("join-room", room, socket.id, userNameParam, sessionId);
       
       socket.on("user-connected", (userId: string, remoteUserName: string) => {
          const peer = createPeer(userId, socket.id, stream);
@@ -336,6 +339,12 @@ export default function RoomPage() {
           setActiveUrl(url);
           setWatchMode(!!url);
       });
+
+      // Handle Remote Mute/Video Toggles for UI updates if needed
+      socket.on("user-toggle-audio", (userId: string, isMuted: boolean) => {
+           // We can update UI state here if we want to show a mute icon on peer
+           // For now, the stream track enabled/disabled mostly handles the AV
+      });
       
       socket.on("room-full", () => {
           alert("Room limit reached (Max 4 participants). You cannot join.");
@@ -349,11 +358,22 @@ export default function RoomPage() {
         socket.off("signal");
         socket.off("user-disconnected");
         socket.off("watch-mode-update");
+        socket.off("user-toggle-audio");
     }
-  }, [socket, roomId]);
+  }, [socket, roomId, userNameParam, sessionId]);
 
   function createPeer(userToSignal: string, callerId: string, stream: MediaStream) {
-      const peer = new SimplePeer({ initiator: true, trickle: false, stream });
+      const peer = new SimplePeer({ 
+          initiator: true, 
+          trickle: false, 
+          stream,
+          config: { 
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' }, 
+                { urls: 'stun:global.stun.twilio.com:3478' }
+            ] 
+          }
+      });
       peer.on("signal", signal => {
           socket.emit("signal", { to: userToSignal, from: callerId, signal, userName: userNameParam });
       });
@@ -370,7 +390,17 @@ export default function RoomPage() {
   }
 
   function addPeer(incomingSignalId: string, callerId: string, signal: any, stream: MediaStream, incomingName: string) {
-      const peer = new SimplePeer({ initiator: false, trickle: false, stream });
+      const peer = new SimplePeer({ 
+          initiator: false, 
+          trickle: false, 
+          stream,
+          config: { 
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:global.stun.twilio.com:3478' }
+            ] 
+          }
+      });
       peer.on("signal", signal => {
           socket.emit("signal", { to: incomingSignalId, from: callerId, signal, userName: userNameParam });
       });
@@ -392,6 +422,8 @@ export default function RoomPage() {
           if (audioTrack) {
             audioTrack.enabled = !audioTrack.enabled;
             setMuted(!muted);
+            // Notify peers (Optional, but good for UI)
+            // socket.emit("user-toggle-audio", !audioTrack.enabled, Array.isArray(roomId) ? roomId[0] : (roomId || ""));
           }
       }
   }
