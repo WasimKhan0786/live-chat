@@ -40,16 +40,26 @@ export default function Home() {
             alert("Please enter your name first!");
             return;
         }
+
+        // Extract Room ID if User pastes full URL
+        let idToJoin = roomId.trim();
+        if(idToJoin.includes("/room/")) {
+            const parts = idToJoin.split("/room/");
+            if(parts[1]) {
+                idToJoin = parts[1].split("?")[0]; // Remove query params if any
+            }
+        }
+
         try {
           await fetch('/api/notify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ roomId: roomId, action: 'join', user: userName })
+            body: JSON.stringify({ roomId: idToJoin, action: 'join', user: userName })
           });
         } catch (error) {
            console.error("Notify error", error);
         }
-      router.push(`/room/${roomId}?name=${encodeURIComponent(userName)}`);
+      router.push(`/room/${idToJoin}?name=${encodeURIComponent(userName)}`);
     }
   };
 
