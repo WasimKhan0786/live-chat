@@ -202,30 +202,35 @@ export default function RoomPage() {
         video: { facingMode: newMode ? "environment" : "user" }, 
         audio: true 
     }).then(stream => {
-        // Handle Video Off state logic if needed, but usually we enable it to show the switch
-        if(videoOff) stream.getVideoTracks().forEach(t => t.enabled = false);
+        // Handle Video Off state
+        const newVideoTrack = stream.getVideoTracks()[0];
+        if(videoOff) newVideoTrack.enabled = false;
         
+        // --- Local Update ---
+        // Instead of replacing the entire stream object (which might cause React re-mount),
+        // let's try to update the tracks if possible, or just be careful.
+        // Actually, replacing stream state is safer for React cleanliness, but to "not create new screen",
+        // we generally rely on the VideoFeed component simply receiving new srcObject.
         setMyStream(stream);
 
-        // Update peers with new track
-        const videoTrack = stream.getVideoTracks()[0];
-        
-        // IMPORTANT: We must update the `peers` state or `peersRef` to ensure consistency.
-        // Also simple-peer's `.replaceTrack` is a good abstraction if available, but native checks allow more control.
+        // --- Broadcast Update to Peers ---
         peersRef.current.forEach(p => {
              if(p.peer && !p.peer.destroyed) {
-                 // Native WebRTC replaceTrack is smoothest
                  const pc = (p.peer as any)._pc; 
                  if (pc) {
                      const senders = pc.getSenders();
                      const videoSender = senders.find((s: RTCRtpSender) => s.track && s.track.kind === 'video');
+                     
                      if(videoSender) {
-                         videoSender.replaceTrack(videoTrack).catch((e: any) => console.log("Track replace failed", e));
-                     } else {
-                         // If no video sender found (maybe audio only started), we might have to add track.
-                         // But usually sender exists if started with video:true even if disabled.
-                         p.peer.addStream(stream); 
-                     }
+                         // Seamless switch: Replace the track being sent.
+                         // The receiver will see the video content change, but the stream ID / track ID usually stays
+                         // or is handled by the browser's RTCPeerConnection without a new 'addStream' event.
+                         videoSender.replaceTrack(newVideoTrack).catch((e: any) => console.log("Track replace failed", e));
+                     } 
+                     // We intentionally REMOVED the 'else { addStream }' block.
+                     // If there is no existing video sender, we do NOT want to add a new stream
+                     // because that would create a new video element (pop-up) on the receiver's side.
+                     // We act strictly "within the existing video stream".
                  }
              }
         });
