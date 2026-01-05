@@ -16,7 +16,8 @@ export const config = {
   },
 };
 
-const roomIPs = new Map<string, Map<string, string>>(); // roomId -> IP -> socketId
+const roomIPs = new Map<string, Map<string, string>>(); // roomId -> SocketID -> SocketID (Keep for capacity count)
+const roomSessions = new Map<string, Map<string, string>>(); // roomId -> SessionID -> SocketID
 
 // Helper to get IP
 const getIp = (socket: any) => {
@@ -41,8 +42,43 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
     io.on("connection", (socket) => {
       console.log("Socket connected:", socket.id);
 
-      socket.on("join-room", (roomId, userId, userName) => {
-        // Initialize room map if needed
+      socket.on("join-room", (roomId, userId, userName, sessionId) => {
+        // userId is actually socket.id here from client
+
+        // 1. Session Management (Fix Refresh Duplicates)
+        if (!roomSessions.has(roomId)) {
+            roomSessions.set(roomId, new Map());
+        }
+        const sessions = roomSessions.get(roomId)!;
+
+        if (sessionId) {
+            if (sessions.has(sessionId)) {
+                const oldSocketId = sessions.get(sessionId);
+                if (oldSocketId && oldSocketId !== socket.id) {
+                    // This is a REFRESH or Reconnect from same browser session
+                    console.log(`Session ${sessionId} refreshed. Removing ghost ${oldSocketId}`);
+                    
+                    // Forcefully tell everyone the old user is gone
+                    socket.broadcast.to(roomId).emit("user-disconnected", oldSocketId); 
+                    
+                    // Disconnect the ghost socket if it's still hanging around
+                    const oldSocket = io.sockets.sockets.get(oldSocketId);
+                    if (oldSocket) {
+                        oldSocket.leave(roomId);
+                        oldSocket.disconnect(true);
+                    }
+                    
+                    // Also remove from roomIPs map to fix capacity count
+                    if(roomIPs.has(roomId)) {
+                        roomIPs.get(roomId)?.delete(oldSocketId);
+                    }
+                }
+            }
+            // Update session to new socket
+            sessions.set(sessionId, socket.id);
+        }
+
+        // 2. Room Capacity Management
         if (!roomIPs.has(roomId)) {
            roomIPs.set(roomId, new Map());
         }
@@ -50,16 +86,12 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
         const roomMap = roomIPs.get(roomId)!;
 
         // Capacity Check (Max 4 Participants)
+        // Note: usage of roomMap here is just to count active sockets
         if (roomMap.size >= 4 && !roomMap.has(socket.id)) {
              socket.emit("room-full");
              return;
         }
         
-        // Register Socket
-        // We use socket.id as the key now, effectively allowing multiple tabs/devices per IP
-        // Use a dummy 'ip' key or just change the Map structure? 
-        // To minimize refactor, we can just treat the 'inner map' as SocketID -> SocketID or similar.
-        // Actually, let's just use the socket ID as the key in the roomMap.
         roomMap.set(socket.id, socket.id);
 
         socket.join(roomId);
@@ -67,12 +99,19 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
         socket.broadcast.to(roomId).emit("user-connected", userId, userName);
         
         socket.on("disconnect", () => {
-             // Cleanup
+             // Cleanup Maps
              const map = roomIPs.get(roomId);
              if (map) {
                  map.delete(socket.id);
                  if(map.size === 0) roomIPs.delete(roomId);
              }
+             
+             // Cleanup Session
+             if (sessionId && sessions.get(sessionId) === socket.id) {
+                 sessions.delete(sessionId);
+                 if (sessions.size === 0) roomSessions.delete(roomId);
+             }
+
              socket.broadcast.to(roomId).emit("user-disconnected", userId);
         });
       });

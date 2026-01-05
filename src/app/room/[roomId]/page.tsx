@@ -23,6 +23,18 @@ export default function RoomPage() {
   const [myStream, setMyStream] = useState<MediaStream | null>(null);
   const [peers, setPeers] = useState<{peerId: string, peer: SimplePeer.Instance, name: string}[]>([]);
   const [streams, setStreams] = useState<{peerId: string, stream: MediaStream, name: string}[]>([]);
+  const [sessionId, setSessionId] = useState(""); // Store persistent session ID
+
+  useEffect(() => {
+      // Create/Retrieve persistent Session ID to handle refreshes
+      let sId = sessionStorage.getItem('user_session_id');
+      if (!sId) {
+          sId = Math.random().toString(36).substring(7);
+          sessionStorage.setItem('user_session_id', sId);
+      }
+      setSessionId(sId);
+  }, []);
+
 
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [watchUrl, setWatchUrl] = useState("");
@@ -290,7 +302,7 @@ export default function RoomPage() {
       stream.getVideoTracks().forEach(t => t.enabled = false); 
       setMyStream(stream);
       
-      socket.emit("join-room", roomId as string, socket.id, userNameParam);
+      socket.emit("join-room", roomId as string, socket.id, userNameParam, sessionId);
       
       socket.on("user-connected", (userId: string, remoteUserName: string) => {
          const peer = createPeer(userId, socket.id, stream);
