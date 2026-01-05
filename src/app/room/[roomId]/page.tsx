@@ -380,7 +380,7 @@ export default function RoomPage() {
       });
       
       socket.on("room-full", () => {
-          alert("Room limit reached (Max 4 participants). You cannot join.");
+          alert("Room limit reached (Max 10 participants). You cannot join.");
           window.location.href = '/';
       });
 

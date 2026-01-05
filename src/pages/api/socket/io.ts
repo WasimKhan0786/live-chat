@@ -85,9 +85,9 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
         
         const roomMap = roomIPs.get(roomId)!;
 
-        // Capacity Check (Max 4 Participants)
+        // Capacity Check (Max 10 Participants)
         // Note: usage of roomMap here is just to count active sockets
-        if (roomMap.size >= 4 && !roomMap.has(socket.id)) {
+        if (roomMap.size >= 10 && !roomMap.has(socket.id)) {
              socket.emit("room-full");
              return;
         }
