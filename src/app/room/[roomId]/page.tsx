@@ -37,7 +37,8 @@ export default function RoomPage() {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [currentFilter, setCurrentFilter] = useState("none"); // Filter state
   const [useBackCamera, setUseBackCamera] = useState(false); // Camera flip state
-  
+  const [isFilterOpen, setIsFilterOpen] = useState(false); // Filter menu toggle
+  const [isWatchOpen, setIsWatchOpen] = useState(false); // Watch menu toggle
   
   // Need to store metadata about peers
   const peersRef = useRef<{peerId: string, peer: SimplePeer.Instance, name: string}[]>([]);
@@ -325,42 +326,52 @@ export default function RoomPage() {
                 <Monitor className="w-5 h-5"/>
              </button>
              
-             {/* Watch Party Input Popover - simplified */}
-             <div className="relative group">
-                  <button className="p-3 md:p-4 rounded-full bg-white/10 hover:bg-white/20 transition flex-shrink-0">
+             {/* Watch Party Input Popover - Click based */}
+             <div className="relative">
+                  <button 
+                    onClick={() => setIsWatchOpen(!isWatchOpen)}
+                    className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", isWatchOpen ? "bg-primary text-white" : "bg-white/10 hover:bg-white/20")}
+                  >
                      <Play className="w-5 h-5"/>
                   </button>
-                 <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-80 bg-[#1a1a24] border border-white/10 p-4 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300">
-                    <label className="text-sm font-medium mb-2 block">Start Watch Party</label>
-                    <div className="flex gap-2">
-                        <input 
-                            className="bg-black/40 border border-white/10 rounded px-2 py-1 flex-1 text-sm outline-none" 
-                            placeholder="YouTube URL..." 
-                            value={watchUrl}
-                            onChange={e => setWatchUrl(e.target.value)}
-                        />
-                        <button onClick={startWatchParty} className="bg-primary text-xs px-2 py-1 rounded">Go</button>
-                    </div>
-                 </div>
+                 {isWatchOpen && (
+                     <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-80 bg-[#1a1a24] border border-white/10 p-4 rounded-xl shadow-2xl z-50">
+                        <label className="text-sm font-medium mb-2 block">Start Watch Party</label>
+                        <div className="flex gap-2">
+                            <input 
+                                className="bg-black/40 border border-white/10 rounded px-2 py-1 flex-1 text-sm outline-none" 
+                                placeholder="YouTube URL..." 
+                                value={watchUrl}
+                                onChange={e => setWatchUrl(e.target.value)}
+                            />
+                            <button onClick={() => { startWatchParty(); setIsWatchOpen(false); }} className="bg-primary text-xs px-2 py-1 rounded">Go</button>
+                        </div>
+                     </div>
+                 )}
              </div>
 
 
-             {/* Filter Button Popover */}
-             <div className="relative group">
-                  <button className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", currentFilter !== 'none' ? "bg-purple-600 text-white shadow-lg shadow-purple-500/30" : "bg-white/10 hover:bg-white/20")}>
+             {/* Filter Button Popover - Click based */}
+             <div className="relative">
+                  <button 
+                    onClick={() => setIsFilterOpen(!isFilterOpen)} 
+                    className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", (currentFilter !== 'none' || isFilterOpen) ? "bg-purple-600 text-white shadow-lg shadow-purple-500/30" : "bg-white/10 hover:bg-white/20")}
+                  >
                      <Wand2 className="w-5 h-5"/>
                   </button>
-                  <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-64 bg-[#1a1a24] border border-white/10 p-3 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 grid grid-cols-2 gap-2">
-                       {['none', 'smooth', 'vivid', 'bw', 'sepia', 'vintage', 'cyber', 'cool', 'warm', 'dim'].map(f => (
-                           <button 
-                             key={f}
-                             onClick={() => setCurrentFilter(f)}
-                             className={cn("px-2 py-1.5 text-xs rounded-md capitalize transition", currentFilter === f ? "bg-primary text-white" : "bg-white/5 hover:bg-white/10")}
-                           >
-                              {f === 'smooth' ? '✨ Smooth' : f}
-                           </button>
-                       ))}
-                  </div>
+                  {isFilterOpen && (
+                      <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-64 bg-[#1a1a24] border border-white/10 p-3 rounded-xl shadow-2xl grid grid-cols-2 gap-2 z-50">
+                           {['none', 'smooth', 'vivid', 'bw', 'sepia', 'vintage', 'cyber', 'cool', 'warm', 'dim'].map(f => (
+                               <button 
+                                 key={f}
+                                 onClick={() => { setCurrentFilter(f); setIsFilterOpen(false); }}
+                                 className={cn("px-2 py-1.5 text-xs rounded-md capitalize transition", currentFilter === f ? "bg-primary text-white" : "bg-white/5 hover:bg-white/10")}
+                               >
+                                  {f === 'smooth' ? '✨ Smooth' : f}
+                               </button>
+                           ))}
+                      </div>
+                  )}
              </div>
 
              <button onClick={() => setIsChatOpen(!isChatOpen)} className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", isChatOpen ? "bg-primary shadow-lg shadow-primary/20" : "bg-white/10 hover:bg-white/20")}>
