@@ -362,6 +362,9 @@ export default function RoomPage() {
     }
   }, [socket, roomId, userNameParam, sessionId]);
 
+  // Determine sanitized Room ID once
+  const activeRoomId = Array.isArray(roomId) ? roomId[0] : (roomId || "");
+
   function createPeer(userToSignal: string, callerId: string, stream: MediaStream) {
       const peer = new SimplePeer({ 
           initiator: true, 
@@ -396,7 +399,7 @@ export default function RoomPage() {
           stream,
           config: { 
             iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun.l.google.com:19302' }, 
                 { urls: 'stun:global.stun.twilio.com:3478' }
             ] 
           }
@@ -420,10 +423,13 @@ export default function RoomPage() {
       if(myStream) {
           const audioTrack = myStream.getAudioTracks()[0];
           if (audioTrack) {
-            audioTrack.enabled = !audioTrack.enabled;
-            setMuted(!muted);
-            // Notify peers (Optional, but good for UI)
-            // socket.emit("user-toggle-audio", !audioTrack.enabled, Array.isArray(roomId) ? roomId[0] : (roomId || ""));
+            const enabled = !audioTrack.enabled;
+            audioTrack.enabled = enabled;
+            setMuted(!enabled);
+            // Notify peers
+            if (activeRoomId) {
+                socket.emit("video-action", { type: "mute-audio", value: !enabled }, activeRoomId);
+            }
           }
       }
   }
@@ -432,8 +438,13 @@ export default function RoomPage() {
       if(myStream) {
           const videoTrack = myStream.getVideoTracks()[0];
           if(videoTrack) {
-              videoTrack.enabled = !videoTrack.enabled;
-              setVideoOff(!videoTrack.enabled);
+              const enabled = !videoTrack.enabled;
+              videoTrack.enabled = enabled;
+              setVideoOff(!enabled);
+              // Notify peers
+              if(activeRoomId) {
+                  socket.emit("video-action", { type: "mute-video", value: !enabled }, activeRoomId);
+              }
           }
       }
   }
@@ -888,7 +899,7 @@ export default function RoomPage() {
       <ChatSidebar 
         isOpen={isChatOpen} 
         onClose={() => setIsChatOpen(false)} 
-        roomId={Array.isArray(roomId) ? roomId[0] : (roomId || "")} 
+        roomId={activeRoomId} 
         userName={userName}
       />
 
