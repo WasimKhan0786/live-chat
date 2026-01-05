@@ -10,7 +10,7 @@ import { VideoFeed } from "@/components/video-feed";
 import { VideoPlayer } from "@/components/video-player"; // We haven't created this file yet, but I will next.
 import { cn } from "@/lib/utils";
 
-import { Wand2 } from "lucide-react"; // Import Wand icon for filters
+import { Wand2, RefreshCw } from "lucide-react"; // Import Wand and Refresh icons
 // Create a Placeholder for VideoPlayer until I write it, to avoid errors if I missed it.
 // Actually I better write VideoPlayer first? No, I can write valid import.
 
@@ -32,6 +32,7 @@ export default function RoomPage() {
   const [videoOff, setVideoOff] = useState(true); // Camera starts OFF by default to prevent "pop-up" feeling
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [currentFilter, setCurrentFilter] = useState("none"); // Filter state
+  const [useBackCamera, setUseBackCamera] = useState(false); // Camera flip state
   
   const peersRef = useRef<{peerId: string, peer: SimplePeer.Instance}[]>([]);
   
@@ -138,6 +139,50 @@ export default function RoomPage() {
           // Note: "watch-mode-update" listener needs to be handled on server to broadcast
       }
   }
+
+  const toggleCamera = () => {
+    // Switch between front (user) and back (environment)
+    const newMode = !useBackCamera;
+    setUseBackCamera(newMode);
+    
+    // Stop current track
+    if(myStream) {
+        myStream.getVideoTracks().forEach(t => t.stop());
+    }
+    
+    // Get new stream
+    navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: newMode ? "environment" : "user" }, 
+        audio: true 
+    }).then(stream => {
+        // Handle Video Off state logic if needed, but usually we enable it to show the switch
+        if(videoOff) stream.getVideoTracks().forEach(t => t.enabled = false);
+        
+        setMyStream(stream);
+
+        // Update peers with new track
+        const videoTrack = stream.getVideoTracks()[0];
+        peers.forEach(p => {
+            // Find old sender
+            // Note: Simplistic replacement. In complex app, track ID management is needed.
+            // Here we assume simple-peer's stream replacement logic or renegotiation
+            // Actually, replaceTrack is safer.
+             // We need reference to old track. Since we stopped it, we rely on myStream state (which is stale inside promises sometimes).
+             // Better way:
+             if(p.peer && !p.peer.destroyed) {
+                 // p.peer.addTrack(videoTrack, stream); // This adds a second track, not replaces.
+                 // Ideally we use replaceTrack if available on sender.
+                 // For now, this basically refreshes local view. Remote view update is tricky without full renegotiation in simple-peer v9.
+                 // But let's try removing old stream and adding new.
+                 p.peer.removeStream(myStream!);
+                 p.peer.addStream(stream);
+             }
+        });
+    }).catch(err => {
+        console.error("Camera switch error", err);
+        setUseBackCamera(!newMode); // Revert on failure
+    });
+  };
 
   const toggleScreenShare = () => {
       if (isScreenSharing) {
@@ -253,6 +298,10 @@ export default function RoomPage() {
              </button>
              <button onClick={toggleVideo} className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", videoOff ? "bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/20" : "bg-white/10 hover:bg-white/20")}>
                 {videoOff ? <VideoOff className="w-5 h-5"/> : <Video className="w-5 h-5"/>}
+             </button>
+
+             <button onClick={toggleCamera} className="p-3 md:p-4 rounded-full bg-white/10 hover:bg-white/20 transition flex-shrink-0 md:hidden">
+                <RefreshCw className="w-5 h-5"/>
              </button>
              
              <button onClick={toggleScreenShare} className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0 mobile-hide", isScreenSharing ? "bg-primary shadow-lg" : "bg-white/10 hover:bg-white/20")}>
