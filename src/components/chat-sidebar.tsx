@@ -8,18 +8,19 @@ interface ChatSidebarProps {
   roomId: string;
   isOpen: boolean;
   onClose: () => void;
+  userName: string;
 }
 
-export const ChatSidebar = ({ roomId, isOpen, onClose }: ChatSidebarProps) => {
+export const ChatSidebar = ({ roomId, isOpen, onClose, userName }: ChatSidebarProps) => {
   const { socket } = useSocket();
-  const [messages, setMessages] = useState<{ text: string; sender: string }[]>([]);
+  const [messages, setMessages] = useState<{ text: string; senderId: string; senderName: string }[]>([]);
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!socket) return;
 
-    const handleMessage = (msg: { text: string; sender: string }) => {
+    const handleMessage = (msg: { text: string; senderId: string; senderName: string }) => {
       setMessages((prev) => [...prev, msg]);
       setTimeout(() => {
         if (scrollRef.current) {
@@ -29,11 +30,11 @@ export const ChatSidebar = ({ roomId, isOpen, onClose }: ChatSidebarProps) => {
     };
 
     socket.on("receive-message", handleMessage);
-    socket.on("chat-message", handleMessage);
+    // Remove "chat-message" listener if it was redundant or ensure parity
+    // Keeping logic simple: io.ts emits 'receive-message'
 
     return () => {
       socket.off("receive-message", handleMessage);
-      socket.off("chat-message", handleMessage);
     };
   }, [socket]);
 
@@ -41,10 +42,13 @@ export const ChatSidebar = ({ roomId, isOpen, onClose }: ChatSidebarProps) => {
     e.preventDefault();
     if (!input.trim() || !socket) return;
 
-    // Use a simplified sender for now
-    socket.emit("send-message", { text: input, sender: "User" }, roomId);
-    socket.emit("chat-message", { text: input, sender: "User", roomId: roomId }); 
+    const msgData = { text: input, senderId: socket.id, senderName: userName };
     
+    // Optimistic update
+    // setMessages((prev) => [...prev, msgData]); // Actually better to wait for server echo to ensure order? 
+    // Usually io.to(roomId) includes sender. So we don't optimistic update to avoid double.
+
+    socket.emit("send-message", msgData, roomId);
     setInput("");
   };
   
@@ -61,17 +65,21 @@ export const ChatSidebar = ({ roomId, isOpen, onClose }: ChatSidebarProps) => {
         {messages.length === 0 && (
              <div className="text-center text-muted-foreground text-sm mt-10">No messages yet. Say hello!</div>
         )}
-        {messages.map((m, i) => (
-          <div key={i} className={`flex flex-col ${m.sender === "User" ? "items-end" : "items-start"}`}>
-             <div className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm ${
-               m.sender === "User" 
-               ? "bg-primary text-white rounded-br-none" 
-               : "bg-zinc-800 text-zinc-100 rounded-bl-none"
-             }`}>
-               {m.text}
-             </div>
-          </div>
-        ))}
+        {messages.map((m, i) => {
+          const isMe = m.senderId === socket?.id;
+          return (
+            <div key={i} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+               {!isMe && <span className="text-[10px] text-muted-foreground ml-1 mb-0.5">{m.senderName}</span>}
+               <div className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm break-words ${
+                 isMe 
+                 ? "bg-primary text-white rounded-br-none" 
+                 : "bg-zinc-800 text-zinc-100 rounded-bl-none"
+               }`}>
+                 {m.text}
+               </div>
+            </div>
+          );
+        })}
       </div>
 
       <form onSubmit={sendMessage} className="p-4 border-t border-white/10 bg-black/20 flex gap-2">

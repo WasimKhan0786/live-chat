@@ -613,7 +613,7 @@ export default function RoomPage() {
       </div>
       
       {/* Sidebar */}
-      <ChatSidebar roomId={Array.isArray(roomId) ? roomId[0] : (roomId || "")} isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
+      <ChatSidebar roomId={Array.isArray(roomId) ? roomId[0] : (roomId || "")} isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} userName={userName || userNameParam || "User"} />
        
        {/* Custom Leave Confirmation Modal */}
        {isLeaveModalOpen && (
