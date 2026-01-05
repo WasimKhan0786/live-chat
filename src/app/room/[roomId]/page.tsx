@@ -112,9 +112,44 @@ export default function RoomPage() {
       setVoiceEffect(effect);
       setIsVoiceMenuOpen(false);
 
-      if(!originalAudioStreamRef.current && myStream) {
-          originalAudioStreamRef.current = new MediaStream(myStream.getAudioTracks());
+      if(!myStream) return;
+      
+      // Initialize original stream ref if needed
+      if(!originalAudioStreamRef.current) {
+          const track = myStream.getAudioTracks()[0];
+          if(track) originalAudioStreamRef.current = new MediaStream([track]);
       }
+      
+      // If NONE, revert to original track and bypass AudioContext
+      if (effect === 'none') {
+           const originalTrack = originalAudioStreamRef.current?.getAudioTracks()[0];
+           if (originalTrack) {
+                // Cleanup graph
+                if (audioGraphRef.current.source) {
+                    try { audioGraphRef.current.source.disconnect(); } catch(e) {}
+                }
+                audioGraphRef.current.nodes.forEach(n => {
+                    try { n.disconnect(); } catch(e) {}
+                });
+                audioGraphRef.current = { source: null, nodes: [] };
+
+                // Replace sender with original track
+                peersRef.current.forEach(p => {
+                        if(p.peer && !p.peer.destroyed) {
+                            const pc = (p.peer as any)._pc; 
+                            if (pc) {
+                                const senders = pc.getSenders();
+                                const audioSender = senders.find((s: RTCRtpSender) => s.track && s.track.kind === 'audio');
+                                if(audioSender) {
+                                    audioSender.replaceTrack(originalTrack).catch((e: any) => console.log("Replace Track Error", e));
+                                }
+                            }
+                        }
+                });
+           }
+           return;
+      }
+
       if(!originalAudioStreamRef.current) return;
 
       if(!audioContextRef.current) {
@@ -128,6 +163,7 @@ export default function RoomPage() {
       }
       const dest = audioDestinationRef.current;
 
+      // Cleanup previous graph
       if (audioGraphRef.current.source) {
           try { audioGraphRef.current.source.disconnect(); } catch(e) {}
       }
@@ -194,9 +230,7 @@ export default function RoomPage() {
            finalOutput = null as any; 
       }
 
-      if(effect === 'none') {
-           source.connect(dest);
-      } else if (finalOutput) {
+      if (finalOutput) {
            finalOutput.connect(dest);
       }
 
@@ -375,14 +409,22 @@ export default function RoomPage() {
         myStream.getVideoTracks().forEach(t => t.stop());
     }
     
+    // Request ONLY VIDEO to avoid interrupting the audio stream
     navigator.mediaDevices.getUserMedia({ 
         video: { facingMode: newMode ? "environment" : "user" }, 
-        audio: true 
-    }).then(stream => {
-        const newVideoTrack = stream.getVideoTracks()[0];
+        audio: false 
+    }).then(videoStream => {
+        const newVideoTrack = videoStream.getVideoTracks()[0];
         if(videoOff) newVideoTrack.enabled = false;
         
-        setMyStream(stream);
+        // Create new combined stream with OLD audio and NEW video
+        const oldAudioTrack = myStream?.getAudioTracks()[0];
+        const newStream = new MediaStream([newVideoTrack]);
+        if (oldAudioTrack) {
+            newStream.addTrack(oldAudioTrack);
+        }
+
+        setMyStream(newStream);
 
         peersRef.current.forEach(p => {
              if(p.peer && !p.peer.destroyed) {
@@ -401,6 +443,27 @@ export default function RoomPage() {
         setUseBackCamera(!newMode); 
     });
   };
+
+  // Resume AudioContext on visibility change to prevent background freezing
+  useEffect(() => {
+      const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+                    audioContextRef.current.resume();
+                }
+                // Refresh video tracks if needed
+                if (myStream) {
+                    const videoTrack = myStream.getVideoTracks()[0];
+                    if (videoTrack && !videoTrack.enabled && !videoOff) {
+                         // Attempt to re-enable if it got stuck
+                         videoTrack.enabled = true;
+                    }
+                }
+            }
+      };
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+      return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [myStream, videoOff]);
 
   const toggleScreenShare = () => {
       if (isScreenSharing) {
@@ -647,8 +710,16 @@ export default function RoomPage() {
                  {/* Mini Browser Button */}
                 <div className="relative">
                     <button 
-                    onClick={() => setIsBrowserOpen(!isBrowserOpen)}
-                    className={cn("hidden md:flex p-2 md:p-4 rounded-full transition flex-shrink-0", isBrowserOpen ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30" : "bg-white/10 hover:bg-white/20")}
+                    onClick={() => {
+                        if (!isBrowserOpen) {
+                            setIsWatchOpen(false);
+                            setIsFilterOpen(false);
+                            setIsVoiceMenuOpen(false);
+                            setIsChatOpen(false);
+                        }
+                        setIsBrowserOpen(!isBrowserOpen);
+                    }}
+                    className={cn("p-2 md:p-4 rounded-full transition flex-shrink-0", isBrowserOpen ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30" : "bg-white/10 hover:bg-white/20")}
                     >
                         <Globe className="w-4 h-4 md:w-5 md:h-5"/>
                     </button>
@@ -772,7 +843,6 @@ export default function RoomPage() {
       <ChatSidebar 
         isOpen={isChatOpen} 
         onClose={() => setIsChatOpen(false)} 
-        socket={socket} 
         roomId={Array.isArray(roomId) ? roomId[0] : (roomId || "")} 
         userName={userName}
       />
