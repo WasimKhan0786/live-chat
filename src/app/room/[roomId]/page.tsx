@@ -160,10 +160,15 @@ export default function RoomPage() {
       }
   }
   
+  // Toggle Video (Mute/Unmute Video Track)
   const toggleVideo = () => {
       if(myStream) {
-          myStream.getVideoTracks()[0].enabled = !myStream.getVideoTracks()[0].enabled;
-          setVideoOff(!videoOff);
+          const videoTrack = myStream.getVideoTracks()[0];
+          if(videoTrack) {
+              videoTrack.enabled = !videoTrack.enabled;
+              setVideoOff(!videoTrack.enabled);
+              // Note: No need to replace stream here, just enabling/disabling track sends black frame or silence.
+          }
       }
   }
   
@@ -198,21 +203,30 @@ export default function RoomPage() {
 
         // Update peers with new track
         const videoTrack = stream.getVideoTracks()[0];
-        peers.forEach(p => {
-            // Find old sender
-            // Note: Simplistic replacement. In complex app, track ID management is needed.
-            // Here we assume simple-peer's stream replacement logic or renegotiation
-            // Actually, replaceTrack is safer.
-             // We need reference to old track. Since we stopped it, we rely on myStream state (which is stale inside promises sometimes).
-             // Better way:
+        
+        // IMPORTANT: We must update the `peers` state or `peersRef` to ensure consistency.
+        // Also simple-peer's `.replaceTrack` is a good abstraction if available, but native checks allow more control.
+        peersRef.current.forEach(p => {
              if(p.peer && !p.peer.destroyed) {
-                 // p.peer.addTrack(videoTrack, stream); // This adds a second track, not replaces.
-                 // Ideally we use replaceTrack if available on sender.
-                 // For now, this basically refreshes local view. Remote view update is tricky without full renegotiation in simple-peer v9.
-                 // But let's try removing old stream and adding new.
-                 p.peer.removeStream(myStream!);
-                 p.peer.addStream(stream);
+                 // Native WebRTC replaceTrack is smoothest
+                 const pc = (p.peer as any)._pc; 
+                 if (pc) {
+                     const senders = pc.getSenders();
+                     const videoSender = senders.find((s: RTCRtpSender) => s.track && s.track.kind === 'video');
+                     if(videoSender) {
+                         videoSender.replaceTrack(videoTrack).catch((e: any) => console.log("Track replace failed", e));
+                     } else {
+                         // If no video sender found (maybe audio only started), we might have to add track.
+                         // But usually sender exists if started with video:true even if disabled.
+                         p.peer.addStream(stream); 
+                     }
+                 }
              }
+        });
+    }).catch(err => {
+        console.error("Camera switch error", err);
+        setUseBackCamera(!newMode); // Revert on failure
+    });
         });
     }).catch(err => {
         console.error("Camera switch error", err);
