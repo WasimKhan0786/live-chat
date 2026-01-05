@@ -86,8 +86,16 @@ export default function Home() {
       )}
 
       <div className="text-center space-y-4 max-w-2xl">
-        <h1 className="text-4xl md:text-7xl font-bold tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-primary via-purple-400 to-indigo-500 animate-text-shimmer bg-[size:200%_auto]">
-          Connect. Share. Watch.
+        <h1 className="flex flex-col md:flex-row gap-2 md:gap-4 text-5xl md:text-7xl font-extrabold tracking-tighter text-center">
+          <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-cyan-400 animate-in fade-in slide-in-from-bottom-8 duration-1000 fill-mode-forwards">
+            Connect.
+          </span>
+          <span className="bg-clip-text text-transparent bg-gradient-to-r from-violet-400 to-fuchsia-400 animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-200 fill-mode-forwards">
+            Share.
+          </span>
+          <span className="bg-clip-text text-transparent bg-gradient-to-r from-orange-400 to-red-500 animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-500 fill-mode-forwards">
+            Watch.
+          </span>
         </h1>
         <p className="text-muted-foreground text-lg md:text-xl max-w-lg mx-auto leading-relaxed">
           The ultimate real-time communication platform for calls, screen sharing, and watch parties.
