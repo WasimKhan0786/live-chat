@@ -356,21 +356,44 @@ export default function RoomPage() {
              <div className="relative">
                   <button 
                     onClick={() => setIsWatchOpen(!isWatchOpen)}
-                    className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", isWatchOpen ? "bg-primary text-white" : "bg-white/10 hover:bg-white/20")}
+                    className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", isWatchOpen || watchMode ? "bg-primary text-white" : "bg-white/10 hover:bg-white/20")}
                   >
                      <Play className="w-5 h-5"/>
                   </button>
                  {isWatchOpen && (
                      <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-80 bg-[#1a1a24] border border-white/10 p-4 rounded-xl shadow-2xl z-50">
-                        <label className="text-sm font-medium mb-2 block">Start Watch Party</label>
-                        <div className="flex gap-2">
-                            <input 
-                                className="bg-black/40 border border-white/10 rounded px-2 py-1 flex-1 text-sm outline-none" 
-                                placeholder="YouTube URL..." 
-                                value={watchUrl}
-                                onChange={e => setWatchUrl(e.target.value)}
-                            />
-                            <button onClick={() => { startWatchParty(); setIsWatchOpen(false); }} className="bg-primary text-xs px-2 py-1 rounded">Go</button>
+                        <label className="text-sm font-medium mb-2 block">
+                            {activeUrl ? "Current Watch Party" : "Start Watch Party"}
+                        </label>
+                        <div className="flex flex-col gap-3">
+                            <div className="flex gap-2">
+                                <input 
+                                    className="bg-black/40 border border-white/10 rounded px-2 py-2 flex-1 text-sm outline-none placeholder:text-muted-foreground/50" 
+                                    placeholder="Paste YouTube URL..." 
+                                    value={watchUrl}
+                                    onChange={e => setWatchUrl(e.target.value)}
+                                />
+                                <button 
+                                    onClick={() => { startWatchParty(); setIsWatchOpen(false); }} 
+                                    className="bg-primary hover:bg-primary/90 text-sm px-3 py-2 rounded font-medium transition"
+                                >
+                                    Play
+                                </button>
+                            </div>
+                            {activeUrl && (
+                                <button 
+                                    onClick={() => { 
+                                        setActiveUrl(""); 
+                                        setWatchMode(false); 
+                                        setWatchUrl("");
+                                        socket?.emit("watch-mode-update", "", Array.isArray(roomId) ? roomId[0] : (roomId || "")); 
+                                        setIsWatchOpen(false);
+                                    }} 
+                                    className="w-full bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/30 text-xs py-2 rounded transition"
+                                >
+                                    End Watch Party
+                                </button>
+                            )}
                         </div>
                      </div>
                  )}
