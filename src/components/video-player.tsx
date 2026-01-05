@@ -1,25 +1,37 @@
 "use client";
-import ReactPlayer from 'react-player';
 import { useEffect, useRef, useState } from 'react';
 import { useSocket } from "@/components/providers/socket-provider";
+import dynamic from 'next/dynamic';
+
+// Dynamically import ReactPlayer to avoid SSR/Hydration issues
+const ReactPlayer = dynamic(() => import('react-player'), { ssr: false });
 
 export const VideoPlayer = ({ roomId, url }: { roomId: string, url: string }) => {
     const playerRef = useRef<any>(null);
     const { socket } = useSocket();
     const [playing, setPlaying] = useState(false);
-    // Cast ReactPlayer to any to avoid React 19 type incompatibility
-    const Player = ReactPlayer as any;
+    const [isSeek, setIsSeek] = useState(false);
     
+    // Prevent event loops: "Remote" updates shouldn't trigger "Local" emits
+    const isRemoteUpdate = useRef(false);
+
     useEffect(() => {
         if(!socket) return;
         
         const handleAction = (action: any) => {
-            console.log("Video Action:", action);
-            if(action.type === 'play') setPlaying(true);
-            if(action.type === 'pause') setPlaying(false);
+            if(action.type === 'play') {
+                isRemoteUpdate.current = true;
+                setPlaying(true);
+            }
+            if(action.type === 'pause') {
+                isRemoteUpdate.current = true;
+                setPlaying(false);
+            }
             if(action.type === 'seek') {
-                setPlaying(true); // Auto play on seek usually
+                setIsSeek(true);
                 playerRef.current?.seekTo(action.time);
+                isRemoteUpdate.current = true;
+                setPlaying(true); // Usually auto-play after seek
             }
         };
 
@@ -30,46 +42,51 @@ export const VideoPlayer = ({ roomId, url }: { roomId: string, url: string }) =>
         }
     }, [socket]);
     
-    // We only emit if initiated by user. ReactPlayer callbacks fire on event.
-    // To avoid loops (receiving 'play' -> calling setPlaying(true) -> onPlay fires -> emit 'play'),
-    // we need to differentiate user action. 
-    // Usually ReactPlayer doesn't distinguish. 
-    // A simple guard: if already playing, don't emit.
-    
     const handlePlay = () => {
-        if(!playing) {
-             setPlaying(true);
-             socket?.emit("video-action", { type: 'play' }, roomId);
+        if (!isRemoteUpdate.current) {
+            setPlaying(true);
+            socket?.emit("video-action", { type: 'play' }, roomId);
         }
-    }
-    
+        isRemoteUpdate.current = false; // Reset after handling
+    };
+
     const handlePause = () => {
-        if(playing) {
-             setPlaying(false);
-             socket?.emit("video-action", { type: 'pause' }, roomId);
+        if (!isRemoteUpdate.current) {
+            setPlaying(false);
+            socket?.emit("video-action", { type: 'pause' }, roomId);
         }
-    }
-    
-    const handleSeek = (seconds: number) => {
-         // This is tricky as seek involves dragging.
-         // Better to listen to onSeek? onSeek only gives seconds.
-         socket?.emit("video-action", { type: 'seek', time: seconds }, roomId);
-    }
-    
-    // Note: This naive logic works for basic sync. For production sync, time updates are needed.
+        isRemoteUpdate.current = false;
+    };
+
+    const handleProgress = (state: { playedSeconds: number }) => {
+       // Optional: Sync time periodically? 
+       // socket?.emit("video-sync", state.playedSeconds, roomId);
+       if (isSeek) setIsSeek(false); // Reset seek flag
+    };
 
     return (
         <div className="w-full h-full bg-black rounded-xl overflow-hidden shadow-2xl border border-white/10 relative">
-            <Player 
+            <ReactPlayer 
                 ref={playerRef}
                 url={url}
                 width="100%"
                 height="100%"
                 playing={playing}
                 controls={true}
-                onPlay={() => { setPlaying(true); socket?.emit("video-action", { type: 'play' }, roomId); }}
-                onPause={() => { setPlaying(false); socket?.emit("video-action", { type: 'pause' }, roomId); }}
-                // onSeek={handleSeek} // onSeek is not always reliably "user" only. 
+                onPlay={handlePlay}
+                onPause={handlePause}
+                onProgress={handleProgress}
+                onError={(e) => console.error("Player Error:", e)}
+                config={{
+                    youtube: {
+                        playerVars: { showinfo: 1, origin: typeof window !== 'undefined' ? window.location.origin : '' }
+                    },
+                    file: { 
+                        attributes: { 
+                            crossOrigin: "true" 
+                        } 
+                    }
+                }}
             />
         </div>
     )
