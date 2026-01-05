@@ -22,8 +22,8 @@ export default function Home() {
       return;
     }
     
-    // Generate simple ID (6 chars)
-    const id = Math.random().toString(36).substring(2, 8);
+    // Generate simple ID (6 chars) - Uppercase for "Code" look
+    const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     
     try {
       await fetch('/api/notify', {
