@@ -110,6 +110,11 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
          socket.broadcast.to(roomId).emit("watch-mode-update", url);
       });
 
+      // Mini Browser (Google) Sync
+      socket.on("browser-update", (url, roomId) => {
+          socket.broadcast.to(roomId).emit("browser-update", url);
+      });
+
       // WebRTC Signaling
       socket.on("signal", (data) => {
         // data: { signal: any, to: string, from: string }
