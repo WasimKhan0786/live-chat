@@ -51,87 +51,100 @@ export default function RoomPage() {
   const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const processingNodeRef = useRef<AudioNode | null>(null);
 
-  // Apply Voice Effect
+  // Store audio graph nodes to cleanup later
+  const audioGraphRef = useRef<{ source: MediaStreamAudioSourceNode | null, nodes: AudioNode[] }>({ source: null, nodes: [] });
+
   const applyVoice = (effect: string) => {
       setVoiceEffect(effect);
       setIsVoiceMenuOpen(false);
 
       if(!originalAudioStreamRef.current && myStream) {
-          // Save original stream
           originalAudioStreamRef.current = new MediaStream(myStream.getAudioTracks());
       }
-
       if(!originalAudioStreamRef.current) return;
 
-      // Init Audio Context
       if(!audioContextRef.current) {
           audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
       }
       const ctx = audioContextRef.current;
-      if (ctx.state === 'suspended') {
-          ctx.resume();
-      }
-      
-      // Close old destination if needed? logic simplified for brevity.
-      // Ideally we reuse the destination, just change graph.
-      
-      // Cleanup previous graph? simpler to close context or disconnect. 
-      // But context close stops everything.
-      // Let's create new destination for simplicity or reuse.
+      if (ctx.state === 'suspended') ctx.resume();
+
+      // Ensure Destination
       if(!audioDestinationRef.current) {
            audioDestinationRef.current = ctx.createMediaStreamDestination();
       }
-      const dest = audioDestinationRef.current; // Re-use destination to keep Peer track constant? 
-      // Actually replacing track is better.
+      const dest = audioDestinationRef.current;
 
+      // Cleanup Old Graph
+      // We must disconnect the specific nodes we created, avoiding breaking the destination if possible.
+      // But easiest way to "switch" is to disconnect the old source from everything
+      if (audioGraphRef.current.source) {
+          try { audioGraphRef.current.source.disconnect(); } catch(e) {}
+      }
+      // Also disconnect any intermediate nodes if we tracked them (optional if source is cut)
+      audioGraphRef.current.nodes.forEach(n => {
+          try { n.disconnect(); } catch(e) {}
+      });
+      audioGraphRef.current.nodes = [];
+
+      // Create New Source
       const sourceStream = originalAudioStreamRef.current;
       const source = ctx.createMediaStreamSource(sourceStream);
+      audioGraphRef.current.source = source;
       
-      // Disconnect everything (naive way implies creating new graph)
-      // Since we can't easily traverse & disconnect, we might just build a new chain 
-      // and update the track.
-      
-      let finalNode: AudioNode = source;
+      let finalOutput: AudioNode = source;
 
       if(effect === 'man') {
-           // Deep Voice (Low Shelf Boost + Pitch illusion via filter)
-           // Native PitchShift is missing. Using Biquad to simulate "Deep"
            const biquad = ctx.createBiquadFilter();
            biquad.type = 'lowshelf';
            biquad.frequency.value = 200;
-           biquad.gain.value = 15; // Boost bass
-           
+           biquad.gain.value = 15;
            source.connect(biquad);
-           finalNode = biquad;
+           
+           // Maybe chain another for depth?
+           const compressor = ctx.createDynamicsCompressor();
+           biquad.connect(compressor);
+           
+           finalOutput = compressor;
+           audioGraphRef.current.nodes.push(biquad, compressor);
+
       } else if (effect === 'woman') {
-           // High Voice (High Shelf Boost)
            const biquad = ctx.createBiquadFilter();
            biquad.type = 'highshelf';
            biquad.frequency.value = 2000;
-           biquad.gain.value = 15; // Boost treble
+           biquad.gain.value = 15;
+           
+           const biquad2 = ctx.createBiquadFilter();
+           biquad2.type = 'peaking';
+           biquad2.frequency.value = 1000;
+           biquad2.Q.value = 1;
+           biquad2.gain.value = 5;
+
            source.connect(biquad);
-           finalNode = biquad;
+           biquad.connect(biquad2);
+           finalOutput = biquad2;
+           audioGraphRef.current.nodes.push(biquad, biquad2);
+
       } else if (effect === 'robot') {
-           // Ring Modulator
            const osc = ctx.createOscillator();
            osc.frequency.value = 50; 
            osc.type = 'sawtooth';
            osc.start();
            
-           const gain = ctx.createGain();
-           gain.gain.value = 0.5;
-           
-           osc.connect(gain.gain); // AM Synthesis
-           // Actually simpler: Source -> Gain. Osc -> Gain.gain
-           // But gain needs to pass audio. 
-           // Standard Ring Mod: Source -> GainNode. GainNode.gain driven by Osc.
-           
            const ringGain = ctx.createGain();
-           ringGain.gain.value = 0.0; // Base 0, modulated by osc
+           ringGain.gain.value = 0.0; // signal * osc
+           
+           // AM Synthesis: Source * Osc
+           // But native nodes don't multiply easily without AudioWorklet.
+           // Trick: Connect Osc to Gain.gain? No, that modulates amplitude of what goes through Gain.
+           // So: Source -> Gain. Osc -> Gain.gain.
+           
            source.connect(ringGain);
            osc.connect(ringGain.gain);
            
-           finalNode = ringGain;
+           finalOutput = ringGain;
+           audioGraphRef.current.nodes.push(osc, ringGain);
+
       } else if (effect === 'echo') {
            const delay = ctx.createDelay();
            delay.delayTime.value = 0.2;
@@ -142,23 +155,27 @@ export default function RoomPage() {
            delay.connect(feedback);
            feedback.connect(delay);
            
-           // Mix dry + wet
-           const merge = ctx.createChannelMerger(1); // Mono mix
-           // Just connect both to destination
+           const merger = ctx.createChannelMerger(1); // Merge Dry + Wet (Delay) to Dest
+           // We can just connect multiple nodes to Dest
            source.connect(dest);
            delay.connect(dest);
-           return; // handled
+           
+           audioGraphRef.current.nodes.push(delay, feedback);
+           // Special case: we already connected to dest
+           finalOutput = null as any; 
       }
 
-      if(effect !== 'echo') finalNode.connect(dest);
       if(effect === 'none') {
-           // Direct
            source.connect(dest);
+      } else if (finalOutput) {
+           finalOutput.connect(dest);
       }
-      
-      // Replace Track
+
+      // Track for "Hear Myself" feature
+      processingNodeRef.current = finalOutput || dest;
+
+      // Replace Track in Peer Connections
       const newTrack = dest.stream.getAudioTracks()[0];
-      
       peersRef.current.forEach(p => {
              if(p.peer && !p.peer.destroyed) {
                  const pc = (p.peer as any)._pc; 
@@ -166,7 +183,7 @@ export default function RoomPage() {
                      const senders = pc.getSenders();
                      const audioSender = senders.find((s: RTCRtpSender) => s.track && s.track.kind === 'audio');
                      if(audioSender) {
-                         audioSender.replaceTrack(newTrack).catch((e: any) => console.log(e));
+                         audioSender.replaceTrack(newTrack).catch((e: any) => console.log("Replace Track Error", e));
                      }
                  }
              }
