@@ -15,7 +15,10 @@ export default function Home() {
       alert("Please enter your name first!");
       return;
     }
-    const id = uuidv4();
+    
+    // Generate simple ID (6 chars)
+    const id = Math.random().toString(36).substring(2, 8);
+    
     try {
       await fetch('/api/notify', {
         method: 'POST',
@@ -25,6 +28,7 @@ export default function Home() {
     } catch (error) {
        console.error("Notify error", error);
     }
+    
     // Pass name in query param
     router.push(`/room/${id}?name=${encodeURIComponent(userName)}`);
   };
