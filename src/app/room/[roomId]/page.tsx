@@ -609,6 +609,14 @@ export default function RoomPage() {
       setIsLeaveModalOpen(true);
   };
 
+  const confirmLeave = () => {
+      if(myStream) {
+          myStream.getTracks().forEach(track => track.stop());
+      }
+      router.push('/');
+      setIsLeaveModalOpen(false);
+  };
+
   /* FILTER LOGIC */
   const applyFilter = (filter: string) => {
       setCurrentFilter(filter);
