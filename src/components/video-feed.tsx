@@ -4,7 +4,12 @@ import { useEffect, useRef } from "react";
 export const VideoFeed = ({ stream, muted = false, isSelf = false, filter = "none", name = "User" }: { stream: MediaStream | null, muted?: boolean, isSelf?: boolean, filter?: string, name?: string }) => {
     const ref = useRef<HTMLVideoElement>(null);
     useEffect(() => {
-        if(ref.current && stream) ref.current.srcObject = stream;
+        if(ref.current && stream) {
+            ref.current.srcObject = stream;
+            ref.current.onloadedmetadata = () => {
+                ref.current?.play().catch(e => console.error("Auto-play failed", e));
+            };
+        }
     }, [stream]);
     
     // Filter definitions

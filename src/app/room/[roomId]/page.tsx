@@ -68,6 +68,9 @@ export default function RoomPage() {
           audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
       }
       const ctx = audioContextRef.current;
+      if (ctx.state === 'suspended') {
+          ctx.resume();
+      }
       
       // Close old destination if needed? logic simplified for brevity.
       // Ideally we reuse the destination, just change graph.
