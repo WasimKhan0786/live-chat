@@ -1,18 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { v4 as uuidv4 } from "uuid";
-import { Video, Users, Monitor, Play } from "lucide-react";
+import { Video, Users, Monitor, Play, AlertCircle } from "lucide-react";
 
 export default function Home() {
   const router = useRouter();
   const [roomId, setRoomId] = useState("");
   const [userName, setUserName] = useState("");
+  const [errorMsg, setErrorMsg] = useState(""); // Custom error state
+
+  const showError = (msg: string) => {
+      setErrorMsg(msg);
+      setTimeout(() => setErrorMsg(""), 3000);
+  };
 
   const createRoom = async () => {
     if (!userName.trim()) {
-      alert("Please enter your name first!");
+      showError("Please enter your name first! 👤");
       return;
     }
     
@@ -37,7 +43,7 @@ export default function Home() {
     e.preventDefault();
     if (roomId.trim()) {
         if (!userName.trim()) {
-            alert("Please enter your name first!");
+            showError("Please enter your name first! 👤");
             return;
         }
 
@@ -68,6 +74,16 @@ export default function Home() {
       {/* Background Blobs */}
       <div className="absolute top-0 left-0 w-96 h-96 bg-primary/20 rounded-full blur-[120px] -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
       <div className="absolute bottom-0 right-0 w-96 h-96 bg-purple-600/20 rounded-full blur-[120px] translate-x-1/2 translate-y-1/2 pointer-events-none" />
+
+      {/* Custom Error Notification Toast */}
+      {errorMsg && (
+        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-5 duration-300">
+            <div className="bg-red-500/10 border border-red-500/50 backdrop-blur-xl text-red-200 px-6 py-3 rounded-full shadow-2xl flex items-center gap-3">
+                <AlertCircle className="w-5 h-5 text-red-500" />
+                <span className="font-medium">{errorMsg}</span>
+            </div>
+        </div>
+      )}
 
       <div className="text-center space-y-4 max-w-2xl">
         <h1 className="text-4xl md:text-7xl font-bold tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-primary via-purple-400 to-indigo-500 animate-text-shimmer bg-[size:200%_auto]">
