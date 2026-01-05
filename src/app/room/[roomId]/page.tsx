@@ -42,7 +42,7 @@ export default function RoomPage() {
   const [watchMode, setWatchMode] = useState(false);
   
   const [muted, setMuted] = useState(false);
-  const [videoOff, setVideoOff] = useState(true); 
+  const [videoOff, setVideoOff] = useState(false); // Enable video by default
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [currentFilter, setCurrentFilter] = useState("none"); 
   const [useBackCamera, setUseBackCamera] = useState(false); 
@@ -296,9 +296,10 @@ export default function RoomPage() {
   }, [userNameParam]);
   
   useEffect(() => {
-    if(!socket || peersRef.current.length > 0 || !userNameParam) return; 
+    if(!socket || !isConnected || peersRef.current.length > 0 || !userNameParam) return; 
+    
+    let isMounted = true;
 
-    // Simplified media request with fallbacks
     const getMedia = async () => {
         try {
             return await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -308,17 +309,12 @@ export default function RoomPage() {
                 return await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
             } catch (e2) {
                  console.warn("No audio found either, joining as spectator");
-                 // Use a dummy stream canvas if needed, or just a null stream for logic?
-                 // SimplePeer NEEDS a stream or at least one track to initiate usually, 
-                 // OR we can join without stream but then we can't speak.
-                 // Let's create a silent audio track / black video track so SimplePeer doesn't crash.
                  const ctx = new AudioContext();
                  const osc = ctx.createOscillator();
                  const dst = ctx.createMediaStreamDestination();
                  osc.connect(dst);
                  osc.start();
                  const track = dst.stream.getAudioTracks()[0];
-                 // Create black video
                  const canvas = document.createElement("canvas");
                  canvas.width = 640; canvas.height = 480;
                  const stream = canvas.captureStream();
@@ -329,13 +325,16 @@ export default function RoomPage() {
     };
 
     getMedia().then(stream => {
-      // If we got a real video track, disable it by default as per existing logic (user joins with video OFF?)
-      // Original code: stream.getVideoTracks().forEach(t => t.enabled = false);
-      // Wait, original logic set video OFF by default? Line 302: t.enabled = false;
-      // If so, we honour that.
-      stream.getVideoTracks().forEach(t => t.enabled = false); 
+      if (!isMounted) {
+          // Cleanup stream if component unmounted while initialising
+          stream.getTracks().forEach(t => t.stop());
+          return;
+      }
+
+      // Start with Video ON by default to resolve "Black Screen" issues
+      // stream.getVideoTracks().forEach(t => t.enabled = false); 
       setMyStream(stream);
-      
+
       // Sanitize roomId to ensure string
       const room = Array.isArray(roomId) ? roomId[0] : (roomId || "");
 
@@ -388,13 +387,14 @@ export default function RoomPage() {
     }).catch(err => console.error("Media Error:", err));
 
     return () => {
+        isMounted = false;
         socket.off("user-connected");
         socket.off("signal");
         socket.off("user-disconnected");
         socket.off("watch-mode-update");
         socket.off("user-toggle-audio");
     }
-  }, [socket, roomId, userNameParam, sessionId]);
+  }, [socket, roomId, userNameParam, sessionId, isConnected]); // Added isConnected to deps
 
   function createPeer(userToSignal: string, callerId: string, stream: MediaStream) {
       const peer = new SimplePeer({ 
