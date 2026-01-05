@@ -42,44 +42,25 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
       console.log("Socket connected:", socket.id);
 
       socket.on("join-room", (roomId, userId, userName) => {
-        const ip = getIp(socket);
-        
         // Initialize room map if needed
         if (!roomIPs.has(roomId)) {
            roomIPs.set(roomId, new Map());
         }
         
         const roomMap = roomIPs.get(roomId)!;
-        const existingSocketId = roomMap.get(ip);
 
-        // Check for duplicates
-        if (existingSocketId && existingSocketId !== socket.id) {
-             // Same IP, different socket. 
-             // Logic: "Maintain or re-establish". a specific request "backend should not create a new user instance".
-             // We interpret this as: Eliminate the duplicate (Ghost/Old Tab) and allow the Reconnect (New Tab/Refresh).
-             // This ensures only 1 "screen" per IP active.
-             
-             // Check if old socket is actually alive
-             const oldSocket = io.sockets.sockets.get(existingSocketId);
-             if (oldSocket) {
-                 // Disconnect the old "ghost" or previous tab
-                 oldSocket.leave(roomId);
-                 oldSocket.disconnect(true); 
-                 // We don't return here; we proceed to let the NEW socket join.
-             }
-        }
-
-        // Capacity Check (Unique IPs)
-        // If this is a NEW IP (not currently in map), check size
-        if (!roomMap.has(ip) || roomMap.get(ip) !== socket.id) {
-            if (roomMap.size >= 4 && !roomMap.has(ip)) {
-                 socket.emit("room-full");
-                 return;
-            }
+        // Capacity Check (Max 4 Participants)
+        if (roomMap.size >= 4 && !roomMap.has(socket.id)) {
+             socket.emit("room-full");
+             return;
         }
         
-        // Register IP
-        roomMap.set(ip, socket.id);
+        // Register Socket
+        // We use socket.id as the key now, effectively allowing multiple tabs/devices per IP
+        // Use a dummy 'ip' key or just change the Map structure? 
+        // To minimize refactor, we can just treat the 'inner map' as SocketID -> SocketID or similar.
+        // Actually, let's just use the socket ID as the key in the roomMap.
+        roomMap.set(socket.id, socket.id);
 
         socket.join(roomId);
         // Broadcast both userId and userName
@@ -88,8 +69,8 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
         socket.on("disconnect", () => {
              // Cleanup
              const map = roomIPs.get(roomId);
-             if (map && map.get(ip) === socket.id) {
-                 map.delete(ip);
+             if (map) {
+                 map.delete(socket.id);
                  if(map.size === 0) roomIPs.delete(roomId);
              }
              socket.broadcast.to(roomId).emit("user-disconnected", userId);
