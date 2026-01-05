@@ -10,16 +10,16 @@ export const VideoFeed = ({ stream, muted = false, isSelf = false, filter = "non
     // Filter definitions
     const getFilterStyle = (f: string) => {
         switch(f) {
-            case 'smooth': return { filter: 'contrast(1.1) brightness(1.1) saturate(1.2) blur(0.5px)' }; // Face Smooth
-            case 'vivid': return { filter: 'saturate(1.5) contrast(1.1)' };
-            case 'bw': return { filter: 'grayscale(1)' };
-            case 'sepia': return { filter: 'sepia(0.5)' };
-            case 'vintage': return { filter: 'sepia(0.3) contrast(1.2) brightness(0.9) saturate(1.5)' }; // 1977
-            case 'cyber': return { filter: 'hue-rotate(90deg) contrast(1.2)' };
-            case 'cool': return { filter: 'saturate(0.5) hue-rotate(30deg) contrast(1.1)' };
-            case 'warm': return { filter: 'sepia(0.2) contrast(1.1) saturate(1.4)' };
-            case 'dim': return { filter: 'brightness(0.8) contrast(1.2)' };
-            case 'invert': return { filter: 'invert(1)' };
+            case 'smooth': return { filter: 'contrast(1.2) brightness(1.2) saturate(1.1)' }; // Clean look
+            case 'vivid': return { filter: 'saturate(2.0) contrast(1.15) brightness(1.1)' }; // Strong vivid
+            case 'bw': return { filter: 'grayscale(1) contrast(1.2)' }; // Solid BW
+            case 'sepia': return { filter: 'sepia(0.8) contrast(0.95)' }; // Distinct Sepia
+            case 'vintage': return { filter: 'sepia(0.4) contrast(1.5) brightness(0.9) saturate(1.5)' }; // Intense vintage
+            case 'cyber': return { filter: 'hue-rotate(180deg) saturate(2.0) contrast(1.2)' }; // Strong Cyber
+            case 'cool': return { filter: 'saturate(0.2) hue-rotate(30deg) contrast(1.1) brightness(1.1)' }; 
+            case 'warm': return { filter: 'sepia(0.3) saturate(1.6) contrast(1.1) brightness(1.1)' };
+            case 'dim': return { filter: 'brightness(0.6) contrast(1.4) saturate(1.2)' };
+            case 'invert': return { filter: 'invert(1) contrast(1.2)' };
             default: return {};
         }
     };

@@ -566,7 +566,7 @@ export default function RoomPage() {
                   </button>
                   {isFilterOpen && (
                       <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-64 bg-[#1a1a24] border border-white/10 p-3 rounded-xl shadow-2xl grid grid-cols-2 gap-2 z-50">
-                           {['none', 'smooth', 'vivid', 'bw', 'sepia', 'vintage', 'cyber', 'cool', 'warm', 'dim'].map(f => (
+                           {['none', 'smooth', 'vivid', 'bw', 'sepia', 'vintage', 'cyber', 'cool', 'warm', 'dim', 'invert'].map(f => (
                                <button 
                                  key={f}
                                  onClick={() => { setCurrentFilter(f); setIsFilterOpen(false); }}
