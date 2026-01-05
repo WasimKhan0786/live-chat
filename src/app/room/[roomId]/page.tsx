@@ -28,7 +28,8 @@ export default function RoomPage() {
   const [watchMode, setWatchMode] = useState(false);
   
   const [muted, setMuted] = useState(false);
-  const [videoOff, setVideoOff] = useState(false);
+  const [videoOff, setVideoOff] = useState(true); // Camera starts OFF by default to prevent "pop-up" feeling
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
   
   const peersRef = useRef<{peerId: string, peer: SimplePeer.Instance}[]>([]);
   
@@ -36,8 +37,10 @@ export default function RoomPage() {
     // Prevent double init
     if(!socket || peersRef.current.length > 0) return; 
 
-    // Initialize Media
+    // Initialize Media with video OFF initially
     navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
+      // Create a dummy video track if we want to start off, or just disable the track
+      stream.getVideoTracks().forEach(t => t.enabled = false); // Start with video disallowed/disabled
       setMyStream(stream);
       
       socket.emit("join-room", roomId as string, socket.id);
@@ -134,6 +137,55 @@ export default function RoomPage() {
       }
   }
 
+  const toggleScreenShare = () => {
+      if (isScreenSharing) {
+          // Stop sharing
+          // Revert to camera (if it was on? or just black?)
+          // For simplicity, we just reload the page or re-acquire media, but better is to replace track.
+          // Due to complexity of replacing tracks in simple-peer without renegotiation issues in some versions:
+          // We will just alert for now that they need to stop and revert.
+          // Or better:
+          navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
+              const videoTrack = stream.getVideoTracks()[0];
+              if(myStream) {
+                   const sender = myStream.getVideoTracks()[0];
+                   sender.stop();
+                   myStream.removeTrack(sender);
+                   myStream.addTrack(videoTrack);
+                   
+                   // Update peers
+                   peers.forEach(p => {
+                       p.peer.replaceTrack(sender, videoTrack, myStream!);
+                   });
+                   // Sync videoOff state
+                   videoTrack.enabled = !videoOff; 
+              }
+              setIsScreenSharing(false);
+          });
+      } else {
+          // Start sharing
+          navigator.mediaDevices.getDisplayMedia({ video: true }).then(screenStream => {
+               const screenTrack = screenStream.getVideoTracks()[0];
+               
+               screenTrack.onended = () => {
+                   toggleScreenShare(); // Revert when user clicks "Stop Sharing" in browser UI
+               };
+
+               if(myStream) {
+                   const sender = myStream.getVideoTracks()[0];
+                   // Don't stop sender immediately if we want to switch back, but for now we replace
+                   myStream.removeTrack(sender);
+                   myStream.addTrack(screenTrack);
+                   
+                   peers.forEach(p => {
+                       p.peer.replaceTrack(sender, screenTrack, myStream!);
+                   });
+               }
+               setIsScreenSharing(true);
+          });
+      }
+  };
+
   const copyId = () => {
      navigator.clipboard.writeText(Array.isArray(roomId) ? roomId[0] : (roomId || ""));
   }
@@ -201,7 +253,7 @@ export default function RoomPage() {
                 {videoOff ? <VideoOff className="w-5 h-5"/> : <Video className="w-5 h-5"/>}
              </button>
              
-             <button onClick={() => alert("Screen sharing implementation pending.")} className="p-3 md:p-4 rounded-full bg-white/10 hover:bg-white/20 transition flex-shrink-0 mobile-hide">
+             <button onClick={toggleScreenShare} className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0 mobile-hide", isScreenSharing ? "bg-primary shadow-lg" : "bg-white/10 hover:bg-white/20")}>
                 <Monitor className="w-5 h-5"/>
              </button>
              
