@@ -272,6 +272,14 @@ export default function RoomPage() {
      navigator.clipboard.writeText(Array.isArray(roomId) ? roomId[0] : (roomId || ""));
   }
 
+  const leaveRoom = () => {
+      if (window.confirm("Are you sure you want to leave the room?")) {
+          // Optional: Stop tracks before leaving
+          myStream?.getTracks().forEach(track => track.stop());
+          router.push('/');
+      }
+  };
+
   return (
     <div className="h-screen w-full bg-[#0c0c14] text-white flex overflow-hidden">
       {/* Main Area */}
@@ -427,7 +435,7 @@ export default function RoomPage() {
                 <MessageSquare className="w-5 h-5"/>
              </button>
              
-             <button onClick={() => router.push('/')} className="p-3 md:p-4 rounded-full bg-red-500 hover:bg-red-600 transition ml-2 md:ml-4 flex-shrink-0 shadow-lg shadow-red-500/20">
+             <button onClick={leaveRoom} className="p-3 md:p-4 rounded-full bg-red-500 hover:bg-red-600 transition ml-2 md:ml-4 flex-shrink-0 shadow-lg shadow-red-500/20">
                 <PhoneOff className="w-5 h-5"/>
              </button>
          </div>
