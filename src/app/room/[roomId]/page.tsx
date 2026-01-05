@@ -45,6 +45,33 @@ export default function RoomPage() {
   const [voiceEffect, setVoiceEffect] = useState("none"); // Voice changer state
   const [isVoiceMenuOpen, setIsVoiceMenuOpen] = useState(false);
   const [hearMyself, setHearMyself] = useState(false); // Audio monitoring
+  const [notifications, setNotifications] = useState<{id: string, senderName: string, text: string}[]>([]);
+
+  // Socket Message Listener for Notifications
+  useEffect(() => {
+    if(!socket) return;
+    
+    const handleNewMessage = (msg: { text: string; senderId: string; senderName: string }) => {
+        // Don't notify for own messages
+        if(msg.senderId === socket.id) return;
+        
+        // Don't notify if chat is open? (Optional, but user asked for popups, usually implies when attention is away, but keeps it consistent to always show).
+        // Let's show it to ensure "pop-up notification" requirement is met visibly. 
+        
+        const id = Math.random().toString(36).substring(7); // Simple ID
+        setNotifications(prev => [...prev, { id, senderName: msg.senderName, text: msg.text }]);
+        
+        // Auto-dismiss
+        setTimeout(() => {
+            setNotifications(prev => prev.filter(n => n.id !== id));
+        }, 4000);
+    };
+
+    socket.on("receive-message", handleNewMessage);
+    return () => {
+        socket.off("receive-message", handleNewMessage);
+    }
+  }, [socket]);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const originalAudioStreamRef = useRef<MediaStream | null>(null);
@@ -670,6 +697,21 @@ export default function RoomPage() {
       
       {/* Sidebar */}
       <ChatSidebar roomId={Array.isArray(roomId) ? roomId[0] : (roomId || "")} isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} userName={userName || userNameParam || "User"} />
+       
+       {/* Message Notifications */}
+       <div className="absolute top-20 right-4 z-40 flex flex-col gap-2 pointer-events-none">
+          {notifications.map((n) => (
+             <div key={n.id} className="bg-[#1a1a24]/90 backdrop-blur-md border border-white/10 p-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-right duration-300 w-64 pointer-events-auto">
+                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center text-xs font-bold text-white uppercase flex-shrink-0">
+                    {n.senderName[0]}
+                 </div>
+                 <div className="flex-1 min-w-0">
+                    <h4 className="text-xs font-bold text-white truncate">{n.senderName}</h4>
+                    <p className="text-xs text-muted-foreground truncate">{n.text}</p>
+                 </div>
+             </div>
+          ))}
+       </div>
        
        {/* Custom Leave Confirmation Modal */}
        {isLeaveModalOpen && (

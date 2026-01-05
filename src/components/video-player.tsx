@@ -1,10 +1,24 @@
 "use client";
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentType } from 'react';
 import { useSocket } from "@/components/providers/socket-provider";
 import dynamic from 'next/dynamic';
 
+interface CustomPlayerProps {
+    url: string;
+    playing?: boolean;
+    controls?: boolean;
+    width?: string | number;
+    height?: string | number;
+    onPlay?: () => void;
+    onPause?: () => void;
+    onProgress?: (state: { playedSeconds: number; played: number; loaded: number; loadedSeconds: number }) => void;
+    onError?: (error: any) => void;
+    config?: any;
+    ref?: any;
+}
+
 // Dynamically import ReactPlayer to avoid SSR/Hydration issues
-const ReactPlayer = dynamic(() => import('react-player'), { ssr: false });
+const ReactPlayer = dynamic<CustomPlayerProps>(() => import('react-player').then(mod => mod.default) as any, { ssr: false });
 
 export const VideoPlayer = ({ roomId, url }: { roomId: string, url: string }) => {
     const playerRef = useRef<any>(null);
@@ -20,18 +34,33 @@ export const VideoPlayer = ({ roomId, url }: { roomId: string, url: string }) =>
         
         const handleAction = (action: any) => {
             if(action.type === 'play') {
-                isRemoteUpdate.current = true;
-                setPlaying(true);
+                 // Only update if state is different to ensure callback fires, 
+                 // OR if state matches but we need to ensure local consistency without trigger.
+                 // Actually, if state is already 'true', React won't re-render, onPlay won't fire.
+                 // So we must NOT set isRemoteUpdate=true if we are already playing.
+                 setPlaying(prev => {
+                     if(!prev) {
+                         isRemoteUpdate.current = true;
+                         return true;
+                     }
+                     return prev;
+                 });
             }
             if(action.type === 'pause') {
-                isRemoteUpdate.current = true;
-                setPlaying(false);
+                setPlaying(prev => {
+                    if(prev) {
+                        isRemoteUpdate.current = true;
+                        return false;
+                    }
+                    return prev;
+                });
             }
             if(action.type === 'seek') {
                 setIsSeek(true);
                 playerRef.current?.seekTo(action.time);
+                // Seek usually triggers play.
+                setPlaying(true); 
                 isRemoteUpdate.current = true;
-                setPlaying(true); // Usually auto-play after seek
             }
         };
 
@@ -66,7 +95,7 @@ export const VideoPlayer = ({ roomId, url }: { roomId: string, url: string }) =>
 
     return (
         <div className="w-full h-full bg-black rounded-xl overflow-hidden shadow-2xl border border-white/10 relative">
-            <ReactPlayer 
+            <ReactPlayer
                 ref={playerRef}
                 url={url}
                 width="100%"
