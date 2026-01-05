@@ -4,14 +4,46 @@ import { useEffect, useRef } from "react";
 export const VideoFeed = ({ stream, muted = false, isSelf = false, filter = "none", name = "User" }: { stream: MediaStream | null, muted?: boolean, isSelf?: boolean, filter?: string, name?: string }) => {
     const ref = useRef<HTMLVideoElement>(null);
     useEffect(() => {
-        if(ref.current && stream) {
-            ref.current.srcObject = stream;
-            ref.current.onloadedmetadata = () => {
-                ref.current?.play().catch(e => console.error("Auto-play failed", e));
-            };
-        }
+        const videoEl = ref.current;
+        if (!videoEl || !stream) return;
+
+        videoEl.srcObject = stream;
+
+        const attemptPlay = () => {
+            if (videoEl.paused || videoEl.ended) {
+                videoEl.play().catch(e => console.log("Resume play failed", e));
+            }
+        };
+
+        const onMetadata = () => attemptPlay();
+        const onSuspend = () => attemptPlay();
+        const onPause = () => {
+             if(!videoEl.ended) attemptPlay(); 
+        };
+        const onStalled = () => attemptPlay();
+        const onVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                attemptPlay();
+            }
+        };
+
+        videoEl.onloadedmetadata = onMetadata;
+        videoEl.addEventListener('suspend', onSuspend);
+        videoEl.addEventListener('pause', onPause);
+        videoEl.addEventListener('stalled', onStalled);
+        document.addEventListener('visibilitychange', onVisibilityChange);
+
+        // Initial Try
+        attemptPlay();
+
+        return () => {
+            videoEl.removeEventListener('suspend', onSuspend);
+            videoEl.removeEventListener('pause', onPause);
+            videoEl.removeEventListener('stalled', onStalled);
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+        };
     }, [stream]);
-    
+
     // Filter definitions
     const getFilterStyle = (f: string) => {
         switch(f) {
