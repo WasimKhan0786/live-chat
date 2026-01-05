@@ -41,6 +41,131 @@ export default function RoomPage() {
   const [isWatchOpen, setIsWatchOpen] = useState(false); // Watch menu toggle
   const [elapsedTime, setElapsedTime] = useState(0); // Call timer
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false); // Leave confirmation modal
+  const [voiceEffect, setVoiceEffect] = useState("none"); // Voice changer state
+  const [isVoiceMenuOpen, setIsVoiceMenuOpen] = useState(false);
+
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const originalAudioStreamRef = useRef<MediaStream | null>(null);
+  const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+
+  // Apply Voice Effect
+  const applyVoice = (effect: string) => {
+      setVoiceEffect(effect);
+      setIsVoiceMenuOpen(false);
+
+      if(!originalAudioStreamRef.current && myStream) {
+          // Save original stream
+          originalAudioStreamRef.current = new MediaStream(myStream.getAudioTracks());
+      }
+
+      if(!originalAudioStreamRef.current) return;
+
+      // Init Audio Context
+      if(!audioContextRef.current) {
+          audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const ctx = audioContextRef.current;
+      
+      // Close old destination if needed? logic simplified for brevity.
+      // Ideally we reuse the destination, just change graph.
+      
+      // Cleanup previous graph? simpler to close context or disconnect. 
+      // But context close stops everything.
+      // Let's create new destination for simplicity or reuse.
+      if(!audioDestinationRef.current) {
+           audioDestinationRef.current = ctx.createMediaStreamDestination();
+      }
+      const dest = audioDestinationRef.current; // Re-use destination to keep Peer track constant? 
+      // Actually replacing track is better.
+
+      const sourceStream = originalAudioStreamRef.current;
+      const source = ctx.createMediaStreamSource(sourceStream);
+      
+      // Disconnect everything (naive way implies creating new graph)
+      // Since we can't easily traverse & disconnect, we might just build a new chain 
+      // and update the track.
+      
+      let finalNode: AudioNode = source;
+
+      if(effect === 'man') {
+           // Deep Voice (Low Shelf Boost + Pitch illusion via filter)
+           // Native PitchShift is missing. Using Biquad to simulate "Deep"
+           const biquad = ctx.createBiquadFilter();
+           biquad.type = 'lowshelf';
+           biquad.frequency.value = 200;
+           biquad.gain.value = 15; // Boost bass
+           
+           source.connect(biquad);
+           finalNode = biquad;
+      } else if (effect === 'woman') {
+           // High Voice (High Shelf Boost)
+           const biquad = ctx.createBiquadFilter();
+           biquad.type = 'highshelf';
+           biquad.frequency.value = 2000;
+           biquad.gain.value = 15; // Boost treble
+           source.connect(biquad);
+           finalNode = biquad;
+      } else if (effect === 'robot') {
+           // Ring Modulator
+           const osc = ctx.createOscillator();
+           osc.frequency.value = 50; 
+           osc.type = 'sawtooth';
+           osc.start();
+           
+           const gain = ctx.createGain();
+           gain.gain.value = 0.5;
+           
+           osc.connect(gain.gain); // AM Synthesis
+           // Actually simpler: Source -> Gain. Osc -> Gain.gain
+           // But gain needs to pass audio. 
+           // Standard Ring Mod: Source -> GainNode. GainNode.gain driven by Osc.
+           
+           const ringGain = ctx.createGain();
+           ringGain.gain.value = 0.0; // Base 0, modulated by osc
+           source.connect(ringGain);
+           osc.connect(ringGain.gain);
+           
+           finalNode = ringGain;
+      } else if (effect === 'echo') {
+           const delay = ctx.createDelay();
+           delay.delayTime.value = 0.2;
+           const feedback = ctx.createGain();
+           feedback.gain.value = 0.4;
+           
+           source.connect(delay);
+           delay.connect(feedback);
+           feedback.connect(delay);
+           
+           // Mix dry + wet
+           const merge = ctx.createChannelMerger(1); // Mono mix
+           // Just connect both to destination
+           source.connect(dest);
+           delay.connect(dest);
+           return; // handled
+      }
+
+      if(effect !== 'echo') finalNode.connect(dest);
+      if(effect === 'none') {
+           // Direct
+           source.connect(dest);
+      }
+      
+      // Replace Track
+      const newTrack = dest.stream.getAudioTracks()[0];
+      
+      peersRef.current.forEach(p => {
+             if(p.peer && !p.peer.destroyed) {
+                 const pc = (p.peer as any)._pc; 
+                 if (pc) {
+                     const senders = pc.getSenders();
+                     const audioSender = senders.find((s: RTCRtpSender) => s.track && s.track.kind === 'audio');
+                     if(audioSender) {
+                         audioSender.replaceTrack(newTrack).catch((e: any) => console.log(e));
+                     }
+                 }
+             }
+      });
+  };
 
   // Format time helper
   const formatTime = (seconds: number) => {
@@ -233,11 +358,6 @@ export default function RoomPage() {
                      // We act strictly "within the existing video stream".
                  }
              }
-        });
-    }).catch(err => {
-        console.error("Camera switch error", err);
-        setUseBackCamera(!newMode); // Revert on failure
-    });
         });
     }).catch(err => {
         console.error("Camera switch error", err);
@@ -453,6 +573,29 @@ export default function RoomPage() {
                                  className={cn("px-2 py-1.5 text-xs rounded-md capitalize transition", currentFilter === f ? "bg-primary text-white" : "bg-white/5 hover:bg-white/10")}
                                >
                                   {f === 'smooth' ? '✨ Smooth' : f}
+                               </button>
+                           ))}
+                      </div>
+                  )}
+             </div>
+
+             {/* Voice Changer Button */}
+             <div className="relative">
+                  <button 
+                    onClick={() => setIsVoiceMenuOpen(!isVoiceMenuOpen)} 
+                    className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", voiceEffect !== 'none' ? "bg-pink-600 text-white shadow-lg shadow-pink-500/30" : "bg-white/10 hover:bg-white/20")}
+                  >
+                     <Mic2 className="w-5 h-5"/>
+                  </button>
+                  {isVoiceMenuOpen && (
+                      <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-40 bg-[#1a1a24] border border-white/10 p-2 rounded-xl shadow-2xl flex flex-col gap-1 z-50">
+                           {['none', 'man', 'woman', 'robot', 'echo'].map(v => (
+                               <button 
+                                 key={v}
+                                 onClick={() => applyVoice(v)}
+                                 className={cn("px-3 py-2 text-sm rounded-lg capitalize transition text-left", voiceEffect === v ? "bg-primary text-white" : "bg-white/5 hover:bg-white/10")}
+                               >
+                                  {v === 'man' ? '👨 Man' : v === 'woman' ? '👩 Woman' : v === 'robot' ? '🤖 Robot' : v === 'echo' ? '🗣️ Echo' : 'Normal'}
                                </button>
                            ))}
                       </div>
