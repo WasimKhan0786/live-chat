@@ -15,9 +15,10 @@ import { Wand2, RefreshCw, Mic2 } from "lucide-react"; // Import Wand, Refresh, 
 // Actually I better write VideoPlayer first? No, I can write valid import.
 
 export default function RoomPage() {
-  const { roomId } = useParams();
+  const params = useParams();
+  const roomId = params?.roomId;
   const searchParams = useSearchParams();
-  const userNameParam = searchParams.get('name');
+  const userNameParam = searchParams?.get('name');
   const [userName, setUserName] = useState<string>("");
 
   const router = useRouter();
@@ -43,10 +44,12 @@ export default function RoomPage() {
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false); // Leave confirmation modal
   const [voiceEffect, setVoiceEffect] = useState("none"); // Voice changer state
   const [isVoiceMenuOpen, setIsVoiceMenuOpen] = useState(false);
+  const [hearMyself, setHearMyself] = useState(false); // Audio monitoring
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const originalAudioStreamRef = useRef<MediaStream | null>(null);
   const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const processingNodeRef = useRef<AudioNode | null>(null);
 
   // Apply Voice Effect
   const applyVoice = (effect: string) => {
@@ -165,6 +168,18 @@ export default function RoomPage() {
                  }
              }
       });
+  };
+
+  const toggleHearMyself = () => {
+      const newState = !hearMyself;
+      setHearMyself(newState);
+      if (processingNodeRef.current && audioContextRef.current) {
+          if (newState) {
+              processingNodeRef.current.connect(audioContextRef.current.destination);
+          } else {
+              try { processingNodeRef.current.disconnect(audioContextRef.current.destination); } catch(e) {}
+          }
+      }
   };
 
   // Format time helper
@@ -508,123 +523,128 @@ export default function RoomPage() {
          </div>
 
          {/* Bottom Control Bar */}
-         <div className="h-20 bg-[#1a1a24]/90 backdrop-blur-md border-t border-white/10 flex items-center justify-center gap-3 md:gap-4 relative z-20 px-4 overflow-x-auto no-scrollbar">
-             <button onClick={toggleMute} className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", muted ? "bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/20" : "bg-white/10 hover:bg-white/20")}>
-                {muted ? <MicOff className="w-5 h-5"/> : <Mic className="w-5 h-5"/>}
-             </button>
-             <button onClick={toggleVideo} className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", videoOff ? "bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/20" : "bg-white/10 hover:bg-white/20")}>
-                {videoOff ? <VideoOff className="w-5 h-5"/> : <Video className="w-5 h-5"/>}
-             </button>
+         <div className="h-16 md:h-20 bg-[#1a1a24]/90 backdrop-blur-md border-t border-white/10 flex items-center justify-between md:justify-center px-2 md:px-4 relative z-20 shrink-0 safe-pb">
+             {/* Left Group */}
+             <div className="flex items-center justify-center gap-1 sm:gap-2">
+                 <button onClick={toggleMute} className={cn("p-2 md:p-4 rounded-full transition flex-shrink-0", muted ? "bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/20" : "bg-white/10 hover:bg-white/20")}>
+                    {muted ? <MicOff className="w-4 h-4 md:w-5 md:h-5"/> : <Mic className="w-4 h-4 md:w-5 md:h-5"/>}
+                 </button>
+                 <button onClick={toggleVideo} className={cn("p-2 md:p-4 rounded-full transition flex-shrink-0", videoOff ? "bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/20" : "bg-white/10 hover:bg-white/20")}>
+                    {videoOff ? <VideoOff className="w-4 h-4 md:w-5 md:h-5"/> : <Video className="w-4 h-4 md:w-5 md:h-5"/>}
+                 </button>
 
-             <button onClick={toggleCamera} className="p-3 md:p-4 rounded-full bg-white/10 hover:bg-white/20 transition flex-shrink-0 md:hidden">
-                <RefreshCw className="w-5 h-5"/>
-             </button>
-             
-             <button onClick={toggleScreenShare} className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0 mobile-hide", isScreenSharing ? "bg-primary shadow-lg" : "bg-white/10 hover:bg-white/20")}>
-                <Monitor className="w-5 h-5"/>
-             </button>
-             
-             {/* Watch Party Input Popover - Click based */}
-             <div className="relative">
-                  <button 
-                    onClick={() => setIsWatchOpen(!isWatchOpen)}
-                    className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", isWatchOpen || watchMode ? "bg-primary text-white" : "bg-white/10 hover:bg-white/20")}
-                  >
-                     <Play className="w-5 h-5"/>
-                  </button>
-                 {isWatchOpen && (
-                     <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-80 bg-[#1a1a24] border border-white/10 p-4 rounded-xl shadow-2xl z-50">
-                        <label className="text-sm font-medium mb-2 block">
-                            {activeUrl ? "Current Watch Party" : "Start Watch Party"}
-                        </label>
-                        <div className="flex flex-col gap-3">
-                            <div className="flex gap-2">
-                                <input 
-                                    className="bg-black/40 border border-white/10 rounded px-2 py-2 flex-1 text-sm outline-none placeholder:text-muted-foreground/50" 
-                                    placeholder="Paste YouTube URL..." 
-                                    value={watchUrl}
-                                    onChange={e => setWatchUrl(e.target.value)}
-                                />
-                                <button 
-                                    onClick={() => { startWatchParty(); setIsWatchOpen(false); }} 
-                                    className="bg-primary hover:bg-primary/90 text-sm px-3 py-2 rounded font-medium transition"
-                                >
-                                    Play
-                                </button>
+                 <button onClick={toggleCamera} className="p-2 md:p-4 rounded-full bg-white/10 hover:bg-white/20 transition flex-shrink-0 md:hidden">
+                    <RefreshCw className="w-4 h-4 md:w-5 md:h-5"/>
+                 </button>
+                 
+                 <button onClick={toggleScreenShare} className={cn("hidden md:flex p-2 md:p-4 rounded-full transition flex-shrink-0", isScreenSharing ? "bg-primary shadow-lg" : "bg-white/10 hover:bg-white/20")}>
+                    <Monitor className="w-4 h-4 md:w-5 md:h-5"/>
+                 </button>
+             </div>
+
+             {/* Center/Right Group - distributed for access */}
+             <div className="flex items-center justify-center gap-1 sm:gap-2">
+                 {/* Watch Party Input Popover */}
+                 <div className="relative">
+                      <button 
+                        onClick={() => setIsWatchOpen(!isWatchOpen)}
+                        className={cn("p-2 md:p-4 rounded-full transition flex-shrink-0", isWatchOpen || watchMode ? "bg-primary text-white" : "bg-white/10 hover:bg-white/20")}
+                      >
+                         <Play className="w-4 h-4 md:w-5 md:h-5"/>
+                      </button>
+                     {isWatchOpen && (
+                         <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-72 md:w-80 bg-[#1a1a24] border border-white/10 p-4 rounded-xl shadow-2xl z-50">
+                            <label className="text-sm font-medium mb-2 block">
+                                {activeUrl ? "Current Watch Party" : "Start Watch Party"}
+                            </label>
+                            <div className="flex flex-col gap-3">
+                                <div className="flex gap-2">
+                                    <input 
+                                        className="bg-black/40 border border-white/10 rounded px-2 py-2 flex-1 text-xs md:text-sm outline-none placeholder:text-muted-foreground/50" 
+                                        placeholder="YouTube URL..." 
+                                        value={watchUrl}
+                                        onChange={e => setWatchUrl(e.target.value)}
+                                    />
+                                    <button 
+                                        onClick={() => { startWatchParty(); setIsWatchOpen(false); }} 
+                                        className="bg-primary hover:bg-primary/90 text-xs md:text-sm px-3 py-2 rounded font-medium transition"
+                                    >
+                                        Play
+                                    </button>
+                                </div>
+                                {activeUrl && (
+                                    <button 
+                                        onClick={() => { 
+                                            setActiveUrl(""); 
+                                            setWatchMode(false); 
+                                            setWatchUrl("");
+                                            socket?.emit("watch-mode-update", "", Array.isArray(roomId) ? roomId[0] : (roomId || "")); 
+                                            setIsWatchOpen(false);
+                                        }} 
+                                        className="w-full bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/30 text-xs py-2 rounded transition"
+                                    >
+                                        End Watch Party
+                                    </button>
+                                )}
                             </div>
-                            {activeUrl && (
-                                <button 
-                                    onClick={() => { 
-                                        setActiveUrl(""); 
-                                        setWatchMode(false); 
-                                        setWatchUrl("");
-                                        socket?.emit("watch-mode-update", "", Array.isArray(roomId) ? roomId[0] : (roomId || "")); 
-                                        setIsWatchOpen(false);
-                                    }} 
-                                    className="w-full bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/30 text-xs py-2 rounded transition"
-                                >
-                                    End Watch Party
-                                </button>
-                            )}
-                        </div>
-                     </div>
-                 )}
+                         </div>
+                     )}
+                 </div>
+
+                 {/* Filter Button Popover */}
+                 <div className="relative">
+                      <button 
+                        onClick={() => setIsFilterOpen(!isFilterOpen)} 
+                        className={cn("p-2 md:p-4 rounded-full transition flex-shrink-0", (currentFilter !== 'none' || isFilterOpen) ? "bg-purple-600 text-white shadow-lg shadow-purple-500/30" : "bg-white/10 hover:bg-white/20")}
+                      >
+                         <Wand2 className="w-4 h-4 md:w-5 md:h-5"/>
+                      </button>
+                      {isFilterOpen && (
+                          <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-64 bg-[#1a1a24] border border-white/10 p-3 rounded-xl shadow-2xl grid grid-cols-2 gap-2 z-50 max-h-[60vh] overflow-y-auto">
+                               {['none', 'smooth', 'vivid', 'bw', 'sepia', 'vintage', 'cyber', 'cool', 'warm', 'dim', 'invert'].map(f => (
+                                   <button 
+                                     key={f}
+                                     onClick={() => { setCurrentFilter(f); setIsFilterOpen(false); }}
+                                     className={cn("px-2 py-1.5 text-xs rounded-md capitalize transition", currentFilter === f ? "bg-primary text-white" : "bg-white/5 hover:bg-white/10")}
+                                   >
+                                      {f === 'smooth' ? '✨ Smooth' : f}
+                                   </button>
+                               ))}
+                          </div>
+                      )}
+                 </div>
+
+                 {/* Voice Changer Button */}
+                 <div className="relative">
+                      <button 
+                        onClick={() => setIsVoiceMenuOpen(!isVoiceMenuOpen)} 
+                        className={cn("p-2 md:p-4 rounded-full transition flex-shrink-0", voiceEffect !== 'none' ? "bg-pink-600 text-white shadow-lg shadow-pink-500/30" : "bg-white/10 hover:bg-white/20")}
+                      >
+                         <Mic2 className="w-4 h-4 md:w-5 md:h-5"/>
+                      </button>
+                      {isVoiceMenuOpen && (
+                          <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-40 bg-[#1a1a24] border border-white/10 p-2 rounded-xl shadow-2xl flex flex-col gap-1 z-50">
+                               {['none', 'man', 'woman', 'robot', 'echo'].map(v => (
+                                   <button 
+                                     key={v}
+                                     onClick={() => applyVoice(v)}
+                                     className={cn("px-3 py-2 text-sm rounded-lg capitalize transition text-left", voiceEffect === v ? "bg-primary text-white" : "bg-white/5 hover:bg-white/10")}
+                                   >
+                                      {v === 'man' ? '👨 Man' : v === 'woman' ? '👩 Woman' : v === 'robot' ? '🤖 Robot' : v === 'echo' ? '🗣️ Echo' : 'Normal'}
+                                   </button>
+                               ))}
+                          </div>
+                      )}
+                 </div>
+
+                 <button onClick={() => setIsChatOpen(!isChatOpen)} className={cn("p-2 md:p-4 rounded-full transition flex-shrink-0", isChatOpen ? "bg-primary shadow-lg shadow-primary/20" : "bg-white/10 hover:bg-white/20")}>
+                    <MessageSquare className="w-4 h-4 md:w-5 md:h-5"/>
+                 </button>
+                 
+                 <button onClick={leaveRoom} className="p-2 md:p-4 rounded-full bg-red-500 hover:bg-red-600 transition flex-shrink-0 shadow-lg shadow-red-500/20">
+                    <PhoneOff className="w-4 h-4 md:w-5 md:h-5"/>
+                 </button>
              </div>
-
-
-             {/* Filter Button Popover - Click based */}
-             <div className="relative">
-                  <button 
-                    onClick={() => setIsFilterOpen(!isFilterOpen)} 
-                    className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", (currentFilter !== 'none' || isFilterOpen) ? "bg-purple-600 text-white shadow-lg shadow-purple-500/30" : "bg-white/10 hover:bg-white/20")}
-                  >
-                     <Wand2 className="w-5 h-5"/>
-                  </button>
-                  {isFilterOpen && (
-                      <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-64 bg-[#1a1a24] border border-white/10 p-3 rounded-xl shadow-2xl grid grid-cols-2 gap-2 z-50">
-                           {['none', 'smooth', 'vivid', 'bw', 'sepia', 'vintage', 'cyber', 'cool', 'warm', 'dim', 'invert'].map(f => (
-                               <button 
-                                 key={f}
-                                 onClick={() => { setCurrentFilter(f); setIsFilterOpen(false); }}
-                                 className={cn("px-2 py-1.5 text-xs rounded-md capitalize transition", currentFilter === f ? "bg-primary text-white" : "bg-white/5 hover:bg-white/10")}
-                               >
-                                  {f === 'smooth' ? '✨ Smooth' : f}
-                               </button>
-                           ))}
-                      </div>
-                  )}
-             </div>
-
-             {/* Voice Changer Button */}
-             <div className="relative">
-                  <button 
-                    onClick={() => setIsVoiceMenuOpen(!isVoiceMenuOpen)} 
-                    className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", voiceEffect !== 'none' ? "bg-pink-600 text-white shadow-lg shadow-pink-500/30" : "bg-white/10 hover:bg-white/20")}
-                  >
-                     <Mic2 className="w-5 h-5"/>
-                  </button>
-                  {isVoiceMenuOpen && (
-                      <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-40 bg-[#1a1a24] border border-white/10 p-2 rounded-xl shadow-2xl flex flex-col gap-1 z-50">
-                           {['none', 'man', 'woman', 'robot', 'echo'].map(v => (
-                               <button 
-                                 key={v}
-                                 onClick={() => applyVoice(v)}
-                                 className={cn("px-3 py-2 text-sm rounded-lg capitalize transition text-left", voiceEffect === v ? "bg-primary text-white" : "bg-white/5 hover:bg-white/10")}
-                               >
-                                  {v === 'man' ? '👨 Man' : v === 'woman' ? '👩 Woman' : v === 'robot' ? '🤖 Robot' : v === 'echo' ? '🗣️ Echo' : 'Normal'}
-                               </button>
-                           ))}
-                      </div>
-                  )}
-             </div>
-
-             <button onClick={() => setIsChatOpen(!isChatOpen)} className={cn("p-3 md:p-4 rounded-full transition flex-shrink-0", isChatOpen ? "bg-primary shadow-lg shadow-primary/20" : "bg-white/10 hover:bg-white/20")}>
-                <MessageSquare className="w-5 h-5"/>
-             </button>
-             
-             <button onClick={leaveRoom} className="p-3 md:p-4 rounded-full bg-red-500 hover:bg-red-600 transition ml-2 md:ml-4 flex-shrink-0 shadow-lg shadow-red-500/20">
-                <PhoneOff className="w-5 h-5"/>
-             </button>
          </div>
       </div>
       

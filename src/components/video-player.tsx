@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useSocket } from "@/components/providers/socket-provider";
 
 export const VideoPlayer = ({ roomId, url }: { roomId: string, url: string }) => {
-    const playerRef = useRef<ReactPlayer>(null);
+    const playerRef = useRef<any>(null);
     const { socket } = useSocket();
     const [playing, setPlaying] = useState(false);
+    // Cast ReactPlayer to any to avoid React 19 type incompatibility
+    const Player = ReactPlayer as any;
     
     useEffect(() => {
         if(!socket) return;
@@ -58,8 +60,8 @@ export const VideoPlayer = ({ roomId, url }: { roomId: string, url: string }) =>
 
     return (
         <div className="w-full h-full bg-black rounded-xl overflow-hidden shadow-2xl border border-white/10 relative">
-            <ReactPlayer 
-                ref={playerRef as any}
+            <Player 
+                ref={playerRef}
                 url={url}
                 width="100%"
                 height="100%"
