@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useSocket } from "@/components/providers/socket-provider";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import SimplePeer from "simple-peer";
 import { Mic, MicOff, Video, VideoOff, Monitor, Play, MessageSquare, PhoneOff, Copy, Share2, LayoutGrid } from "lucide-react";
 import { ChatSidebar } from "@/components/chat-sidebar";
@@ -16,12 +16,16 @@ import { Wand2, RefreshCw } from "lucide-react"; // Import Wand and Refresh icon
 
 export default function RoomPage() {
   const { roomId } = useParams();
+  const searchParams = useSearchParams();
+  const userNameParam = searchParams.get('name');
+  const [userName, setUserName] = useState<string>("");
+
   const router = useRouter();
   const { socket, isConnected } = useSocket();
   
   const [myStream, setMyStream] = useState<MediaStream | null>(null);
-  const [peers, setPeers] = useState<{peerId: string, peer: SimplePeer.Instance}[]>([]);
-  const [streams, setStreams] = useState<{peerId: string, stream: MediaStream}[]>([]);
+  const [peers, setPeers] = useState<{peerId: string, peer: SimplePeer.Instance, name: string}[]>([]);
+  const [streams, setStreams] = useState<{peerId: string, stream: MediaStream, name: string}[]>([]);
 
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [watchUrl, setWatchUrl] = useState("");
@@ -34,11 +38,17 @@ export default function RoomPage() {
   const [currentFilter, setCurrentFilter] = useState("none"); // Filter state
   const [useBackCamera, setUseBackCamera] = useState(false); // Camera flip state
   
-  const peersRef = useRef<{peerId: string, peer: SimplePeer.Instance}[]>([]);
+  
+  // Need to store metadata about peers
+  const peersRef = useRef<{peerId: string, peer: SimplePeer.Instance, name: string}[]>([]);
+
+  useEffect(() => {
+     if(userNameParam) setUserName(userNameParam);
+  }, [userNameParam]);
   
   useEffect(() => {
     // Prevent double init
-    if(!socket || peersRef.current.length > 0) return; 
+    if(!socket || peersRef.current.length > 0 || !userNameParam) return; 
 
     // Initialize Media with video OFF initially
     navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
@@ -46,25 +56,29 @@ export default function RoomPage() {
       stream.getVideoTracks().forEach(t => t.enabled = false); // Start with video disallowed/disabled
       setMyStream(stream);
       
-      socket.emit("join-room", roomId as string, socket.id);
+      socket.emit("join-room", roomId as string, socket.id, userNameParam);
       
-      socket.on("user-connected", (userId: string) => {
+      socket.on("user-connected", (userId: string, remoteUserName: string) => {
+         console.log("User connected:", userId, remoteUserName);
          // Initiator
          const peer = createPeer(userId, socket.id, stream);
-         peersRef.current.push({ peerId: userId, peer });
-         setPeers((prev) => [...prev, { peerId: userId, peer }]);
+         const name = remoteUserName || "User";
+         peersRef.current.push({ peerId: userId, peer, name });
+         setPeers((prev) => [...prev, { peerId: userId, peer, name }]);
       });
 
       socket.on("signal", (data: any) => {
-          // data: { from, signal }
+          // data: { from, signal, userName }
           const item = peersRef.current.find(p => p.peerId === data.from);
           if(item) {
               item.peer.signal(data.signal);
           } else {
               // Answerer
-              const peer = addPeer(data.from, socket.id, data.signal, stream);
-              peersRef.current.push({ peerId: data.from, peer });
-              setPeers((prev) => [...prev, { peerId: data.from, peer }]);
+              const name = data.userName || "User";
+              const peer = addPeer(data.from, socket.id, data.signal, stream, name); // Pass name to signal or handle it?
+              // Wait, addPeer logic needs to store the name.
+              peersRef.current.push({ peerId: data.from, peer, name });
+              setPeers((prev) => [...prev, { peerId: data.from, peer, name }]);
           }
       });
       
@@ -97,21 +111,24 @@ export default function RoomPage() {
   function createPeer(userToSignal: string, callerId: string, stream: MediaStream) {
       const peer = new SimplePeer({ initiator: true, trickle: false, stream });
       peer.on("signal", signal => {
-          socket.emit("signal", { to: userToSignal, from: callerId, signal });
+          socket.emit("signal", { to: userToSignal, from: callerId, signal, userName: userNameParam });
       });
       peer.on("stream", stream => {
-          setStreams(prev => [...prev, { peerId: userToSignal, stream }]);
+          // Find name from peersRef because this is async stream event
+          const p = peersRef.current.find(x => x.peerId === userToSignal);
+          setStreams(prev => [...prev, { peerId: userToSignal, stream, name: p?.name || "User" }]);
       });
       return peer;
   }
 
-  function addPeer(incomingSignalId: string, callerId: string, signal: any, stream: MediaStream) {
+  function addPeer(incomingSignalId: string, callerId: string, signal: any, stream: MediaStream, incomingName: string) {
       const peer = new SimplePeer({ initiator: false, trickle: false, stream });
       peer.on("signal", signal => {
-          socket.emit("signal", { to: incomingSignalId, from: callerId, signal });
+          // Send back my name as well
+          socket.emit("signal", { to: incomingSignalId, from: callerId, signal, userName: userNameParam });
       });
       peer.on("stream", stream => {
-          setStreams(prev => [...prev, { peerId: incomingSignalId, stream }]);
+           setStreams(prev => [...prev, { peerId: incomingSignalId, stream, name: incomingName }]);
       });
       peer.signal(signal);
       return peer;
@@ -265,12 +282,12 @@ export default function RoomPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4 w-full h-full content-center p-2 md:p-4 overflow-y-auto">
                     {/* Self */}
                     <div className="aspect-video relative">
-                        <VideoFeed stream={myStream} muted={true} isSelf={true} filter={currentFilter} />
+                        <VideoFeed stream={myStream} muted={true} isSelf={true} filter={currentFilter} name={userName || "You"} />
                     </div>
                     {/* Peers */}
                     {streams.map((s) => (
                         <div key={s.peerId} className="aspect-video relative">
-                             <VideoFeed stream={s.stream} />
+                             <VideoFeed stream={s.stream} name={s.name} />
                         </div>
                     ))}
                 </div>
@@ -280,11 +297,11 @@ export default function RoomPage() {
             {watchMode && (
                  <div className="absolute bottom-24 left-4 right-4 h-32 flex gap-2 overflow-x-auto p-2 no-scrollbar pointer-events-auto z-10">
                     <div className="h-full aspect-video min-w-[160px] relative shadow-lg ring-1 ring-white/10 rounded-lg overflow-hidden">
-                        <VideoFeed stream={myStream} muted={true} isSelf={true} filter={currentFilter} />
+                        <VideoFeed stream={myStream} muted={true} isSelf={true} filter={currentFilter} name={userName || "You"} />
                     </div>
                     {streams.map((s) => (
                         <div key={s.peerId} className="h-full aspect-video min-w-[160px] relative shadow-lg ring-1 ring-white/10 rounded-lg overflow-hidden">
-                             <VideoFeed stream={s.stream} />
+                             <VideoFeed stream={s.stream} name={s.name} />
                         </div>
                     ))}
                  </div>

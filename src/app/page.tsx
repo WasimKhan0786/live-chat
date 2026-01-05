@@ -11,32 +11,41 @@ export default function Home() {
   const [userName, setUserName] = useState("");
 
   const createRoom = async () => {
+    if (!userName.trim()) {
+      alert("Please enter your name first!");
+      return;
+    }
     const id = uuidv4();
     try {
       await fetch('/api/notify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roomId: id, action: 'create', user: userName || 'Anonymous' })
+        body: JSON.stringify({ roomId: id, action: 'create', user: userName })
       });
     } catch (error) {
        console.error("Notify error", error);
     }
-    router.push(`/room/${id}`);
+    // Pass name in query param
+    router.push(`/room/${id}?name=${encodeURIComponent(userName)}`);
   };
 
   const joinRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (roomId.trim()) {
+        if (!userName.trim()) {
+            alert("Please enter your name first!");
+            return;
+        }
         try {
           await fetch('/api/notify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ roomId: roomId, action: 'join', user: userName || 'Anonymous' })
+            body: JSON.stringify({ roomId: roomId, action: 'join', user: userName })
           });
         } catch (error) {
            console.error("Notify error", error);
         }
-      router.push(`/room/${roomId}`);
+      router.push(`/room/${roomId}?name=${encodeURIComponent(userName)}`);
     }
   };
 
@@ -55,54 +64,55 @@ export default function Home() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl">
-         {/* Join Room Card */}
-         <div className="p-6 rounded-3xl bg-card/50 border border-white/5 backdrop-blur-xl shadow-2xl hover:border-primary/50 transition-all duration-300 group">
-             <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2 group-hover:text-primary transition-colors">
-               <Users className="w-6 h-6" /> Join a Room
+      <div className="w-full max-w-4xl grid md:grid-cols-2 gap-8">
+         {/* Combined Card for better UX */}
+         <div className="md:col-span-2 p-8 rounded-3xl bg-card/50 border border-white/5 backdrop-blur-xl shadow-2xl flex flex-col items-center gap-6 text-center">
+             <h2 className="text-2xl font-semibold flex items-center gap-2">
+                 <Users className="w-6 h-6 text-primary" /> Get Started
              </h2>
-             <form onSubmit={joinRoom} className="space-y-4">
-               <div>
+             
+             {/* Name Input - Required for both */}
+             <div className="w-full max-w-md">
+                 <label className="block text-left text-sm text-muted-foreground mb-2 ml-1">Your Name</label>
                  <input
                    type="text"
-                   placeholder="Your Name (Optional)"
-                   className="w-full bg-secondary/50 border border-white/10 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:ring-2 focus:ring-primary/50 text-base md:text-lg placeholder:text-muted-foreground/50 transition-all shadow-inner"
+                   placeholder="Enter your name..."
+                   className="w-full bg-secondary/50 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary/50 text-lg placeholder:text-muted-foreground/50 transition-all shadow-inner"
+                   value={userName}
                    onChange={(e) => setUserName(e.target.value)}
                  />
-                 <input
-                   type="text"
-                   placeholder="Enter Room ID"
-                   value={roomId}
-                   onChange={(e) => setRoomId(e.target.value)}
-                   className="w-full bg-secondary/50 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary/50 text-base md:text-lg placeholder:text-muted-foreground/50 transition-all shadow-inner"
-                 />
-               </div>
-               <button 
-                 type="submit"
-                 disabled={!roomId}
-                 className="w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_20px_rgba(124,58,237,0.3)] hover:shadow-[0_0_30px_rgba(124,58,237,0.5)]"
-               >
-                 Join Room
-               </button>
-             </form>
-         </div>
-
-         {/* Create Room Card */}
-         <div className="p-6 rounded-3xl bg-card/50 border border-white/5 backdrop-blur-xl shadow-2xl hover:border-primary/50 transition-all duration-300 group flex flex-col justify-between">
-             <div>
-               <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2 group-hover:text-primary transition-colors">
-                 <Video className="w-6 h-6" /> Create New Room
-               </h2>
-               <p className="text-muted-foreground mb-6">
-                 Start a new session. You can invite friends, share your screen, or start a watch party.
-               </p>
              </div>
-             <button 
-                onClick={createRoom}
-                className="w-full bg-secondary hover:bg-secondary/80 text-white border border-white/10 font-medium py-3 rounded-xl transition-all hover:scale-[1.02]"
-             >
-                Create Instant Meeting
-             </button>
+
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-md">
+                 {/* Create Action */}
+                 <button 
+                    onClick={createRoom}
+                    className="flex flex-col items-center justify-center gap-2 p-6 rounded-2xl bg-primary/10 hover:bg-primary/20 border border-primary/20 transition-all hover:scale-[1.02] cursor-pointer group"
+                 >
+                     <div className="p-3 rounded-full bg-primary/20 group-hover:bg-primary/30 text-primary transition-colors">
+                        <Video className="w-6 h-6"/>
+                     </div>
+                     <span className="font-medium">Create New Room</span>
+                 </button>
+
+                 {/* Join Action */}
+                 <div className="flex flex-col gap-3">
+                     <input
+                       type="text"
+                       placeholder="Enter Room ID to Join"
+                       value={roomId}
+                       onChange={(e) => setRoomId(e.target.value)}
+                       className="w-full bg-secondary/50 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm placeholder:text-muted-foreground/50 transition-all text-center"
+                     />
+                     <button 
+                       onClick={joinRoom}
+                       disabled={!roomId}
+                       className="w-full bg-secondary hover:bg-secondary/80 text-white font-medium py-3 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                     >
+                       Join Room
+                     </button>
+                 </div>
+             </div>
          </div>
       </div>
 

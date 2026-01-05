@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef } from "react";
 
-export const VideoFeed = ({ stream, muted = false, isSelf = false, filter = "none" }: { stream: MediaStream | null, muted?: boolean, isSelf?: boolean, filter?: string }) => {
+export const VideoFeed = ({ stream, muted = false, isSelf = false, filter = "none", name = "User" }: { stream: MediaStream | null, muted?: boolean, isSelf?: boolean, filter?: string, name?: string }) => {
     const ref = useRef<HTMLVideoElement>(null);
     useEffect(() => {
         if(ref.current && stream) ref.current.srcObject = stream;
@@ -34,8 +34,8 @@ export const VideoFeed = ({ stream, muted = false, isSelf = false, filter = "non
                 className={`w-full h-full object-cover transition-all duration-300 ${isSelf ? 'scale-x-[-1]' : ''}`}
                 style={isSelf ? getFilterStyle(filter) : {}}
             />
-            <div className="absolute bottom-2 left-2 bg-black/50 px-2 py-1 rounded text-xs text-white opacity-0 group-hover:opacity-100 transition z-10">
-                {isSelf ? "You" : "User"}
+            <div className="absolute bottom-2 left-2 bg-black/50 px-2 py-1 rounded text-xs text-white opacity-0 group-hover:opacity-100 transition z-10 pointer-events-none">
+                {isSelf ? "You (" + name + ")" : name}
             </div>
             {/* Show Badge if filter is active on self */}
             {isSelf && filter !== 'none' && (

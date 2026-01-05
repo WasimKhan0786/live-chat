@@ -34,9 +34,10 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
     io.on("connection", (socket) => {
       console.log("Socket connected:", socket.id);
 
-      socket.on("join-room", (roomId, userId) => {
+      socket.on("join-room", (roomId, userId, userName) => {
         socket.join(roomId);
-        socket.broadcast.to(roomId).emit("user-connected", userId);
+        // Broadcast both userId and userName
+        socket.broadcast.to(roomId).emit("user-connected", userId, userName);
         
         socket.on("disconnect", () => {
              socket.broadcast.to(roomId).emit("user-disconnected", userId);
@@ -60,7 +61,8 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
       // WebRTC Signaling
       socket.on("signal", (data) => {
         // data: { signal: any, to: string, from: string }
-        io.to(data.to).emit("signal", { signal: data.signal, from: data.from });
+        // data: { signal: any, to: string, from: string, userName?: string }
+        io.to(data.to).emit("signal", { signal: data.signal, from: data.from, userName: data.userName });
       });
     });
   }
