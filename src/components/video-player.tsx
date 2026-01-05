@@ -18,7 +18,7 @@ interface CustomPlayerProps {
 }
 
 // Dynamically import ReactPlayer to avoid SSR/Hydration issues
-const ReactPlayer = dynamic<CustomPlayerProps>(() => import('react-player').then(mod => mod.default) as any, { ssr: false });
+const ReactPlayer = dynamic<CustomPlayerProps>(() => import('react-player').then(mod => mod.default || mod) as any, { ssr: false });
 
 export const VideoPlayer = ({ roomId, url }: { roomId: string, url: string }) => {
     const playerRef = useRef<any>(null);
@@ -105,7 +105,11 @@ export const VideoPlayer = ({ roomId, url }: { roomId: string, url: string }) =>
                 onPlay={handlePlay}
                 onPause={handlePause}
                 onProgress={handleProgress}
-                onError={(e) => console.error("Player Error:", e)}
+                onError={(e) => { 
+                    console.error("Player Error:", e);
+                    // Only alert if it's a genuine playback failure (often copyright or format)
+                    alert("Video Check: This video might be restricted/unplayable (Copyright or Invalid URL).");
+                }}
                 config={{
                     youtube: {
                         playerVars: { showinfo: 1, origin: typeof window !== 'undefined' ? window.location.origin : '' }

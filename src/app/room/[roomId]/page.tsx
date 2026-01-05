@@ -46,6 +46,32 @@ export default function RoomPage() {
   const [isVoiceMenuOpen, setIsVoiceMenuOpen] = useState(false);
   const [hearMyself, setHearMyself] = useState(false); // Audio monitoring
   const [notifications, setNotifications] = useState<{id: string, senderName: string, text: string}[]>([]);
+  
+  // Search State
+  const [searchResults, setSearchResults] = useState<{id: string, title: string, thumbnail: string, timestamp: string, author: string, url: string}[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+
+  const handleSearch = async () => {
+      if(!watchUrl.trim()) return;
+      if(watchUrl.startsWith('http')) {
+          startWatchParty(); // Should be handled by button logic but good safety
+          return;
+      }
+      
+      setIsSearching(true);
+      setSearchResults([]);
+      try {
+          const res = await fetch(`/api/youtube-search?q=${encodeURIComponent(watchUrl)}`);
+          const data = await res.json();
+          if(data.videos) {
+              setSearchResults(data.videos);
+          }
+      } catch(e) {
+          console.error("Search failed", e);
+      } finally {
+          setIsSearching(false);
+      }
+  };
 
   // Socket Message Listener for Notifications
   useEffect(() => {
@@ -591,7 +617,7 @@ export default function RoomPage() {
 
              {/* Center/Right Group - distributed for access */}
              <div className="flex items-center justify-center gap-1 sm:gap-2">
-                 {/* Watch Party Input Popover */}
+                  {/* Watch Party Input Popover */}
                  <div className="relative">
                       <button 
                         onClick={() => setIsWatchOpen(!isWatchOpen)}
@@ -600,40 +626,102 @@ export default function RoomPage() {
                          <Play className="w-4 h-4 md:w-5 md:h-5"/>
                       </button>
                      {isWatchOpen && (
-                         <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-72 md:w-80 bg-[#1a1a24] border border-white/10 p-4 rounded-xl shadow-2xl z-50">
-                            <label className="text-sm font-medium mb-2 block">
-                                {activeUrl ? "Current Watch Party" : "Start Watch Party"}
+                         <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-80 md:w-96 bg-[#1a1a24] border border-white/10 p-4 rounded-xl shadow-2xl z-50 flex flex-col max-h-[60vh] overflow-hidden">
+                            <label className="text-sm font-medium mb-3 flex justify-between items-center shrink-0">
+                                <span>{activeUrl ? "Current Watch Party" : "Start Watch Party"}</span>
+                                <span className="text-[10px] text-muted-foreground font-normal bg-white/5 px-1.5 py-0.5 rounded">Syncs for everyone</span>
                             </label>
-                            <div className="flex flex-col gap-3">
+                            
+                            {/* Search Input */}
+                            <div className="flex flex-col gap-3 shrink-0">
                                 <div className="flex gap-2">
                                     <input 
-                                        className="bg-black/40 border border-white/10 rounded px-2 py-2 flex-1 text-xs md:text-sm outline-none placeholder:text-muted-foreground/50" 
-                                        placeholder="YouTube URL..." 
+                                        className="bg-black/40 border border-white/10 rounded px-2 py-2 flex-1 text-xs md:text-sm outline-none placeholder:text-muted-foreground/50 focus:border-primary/50 transition" 
+                                        placeholder="Paste Link OR Type to Search..." 
                                         value={watchUrl}
                                         onChange={e => setWatchUrl(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if(e.key === 'Enter') {
+                                                if(watchUrl.startsWith('http')) {
+                                                    startWatchParty();
+                                                    setIsWatchOpen(false);
+                                                } else {
+                                                    handleSearch();
+                                                }
+                                            }
+                                        }}
                                     />
-                                    <button 
-                                        onClick={() => { startWatchParty(); setIsWatchOpen(false); }} 
-                                        className="bg-primary hover:bg-primary/90 text-xs md:text-sm px-3 py-2 rounded font-medium transition"
-                                    >
-                                        Play
-                                    </button>
+                                    {watchUrl.startsWith('http') || watchUrl.includes('youtube.com') || watchUrl.includes('youtu.be') ? (
+                                        <button 
+                                            onClick={() => { startWatchParty(); setIsWatchOpen(false); }} 
+                                            className="bg-primary hover:bg-primary/90 text-xs md:text-sm px-4 py-2 rounded font-medium transition flex items-center gap-1"
+                                        >
+                                            Play
+                                        </button>
+                                    ) : (
+                                        <button 
+                                            onClick={handleSearch} 
+                                            disabled={isSearching}
+                                            className="bg-white/10 hover:bg-white/20 text-xs md:text-sm px-3 py-2 rounded font-medium transition whitespace-nowrap min-w-[80px] flex items-center justify-center"
+                                        >
+                                            {isSearching ? <span className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"/> : "Search"}
+                                        </button>
+                                    )}
                                 </div>
-                                {activeUrl && (
+                            </div>
+
+                            {/* Results List */}
+                            {searchResults.length > 0 && (
+                                <div className="mt-3 flex flex-col gap-2 overflow-y-auto pr-1 custom-scrollbar">
+                                    <h4 className="text-[10px] uppercase font-bold text-muted-foreground sticky top-0 bg-[#1a1a24] py-1">Search Results</h4>
+                                    {searchResults.map((video) => (
+                                        <button 
+                                            key={video.id}
+                                            onClick={() => {
+                                                setWatchUrl(video.url);
+                                                // Small delay to ensure state updates before sending? 
+                                                // Actually socket emit uses the arg passed, but local preview needs state.
+                                                // Better: direct emit.
+                                                setActiveUrl(video.url);
+                                                setWatchMode(true);
+                                                socket?.emit("watch-mode-update", video.url, Array.isArray(roomId) ? roomId[0] : (roomId || ""));
+                                                
+                                                setIsWatchOpen(false);
+                                                setSearchResults([]);
+                                            }}
+                                            className="flex gap-2 p-2 hover:bg-white/5 rounded-lg transition text-left group"
+                                        >
+                                            <div className="relative w-20 aspect-video bg-black rounded overflow-hidden shrink-0">
+                                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                <img src={video.thumbnail} alt={video.title} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition" />
+                                                <span className="absolute bottom-0.5 right-0.5 bg-black/80 text-[8px] px-1 rounded text-white">{video.timestamp}</span>
+                                            </div>
+                                            <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                                <h5 className="text-xs font-medium text-white line-clamp-2 leading-tight group-hover:text-primary transition">{video.title}</h5>
+                                                <p className="text-[10px] text-muted-foreground">{video.author}</p>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+
+                            {activeUrl && (
+                                <div className="mt-3 pt-3 border-t border-white/10 shrink-0">
                                     <button 
                                         onClick={() => { 
                                             setActiveUrl(""); 
                                             setWatchMode(false); 
                                             setWatchUrl("");
+                                            setSearchResults([]);
                                             socket?.emit("watch-mode-update", "", Array.isArray(roomId) ? roomId[0] : (roomId || "")); 
                                             setIsWatchOpen(false);
                                         }} 
                                         className="w-full bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/30 text-xs py-2 rounded transition"
                                     >
-                                        End Watch Party
+                                        Stop Watching
                                     </button>
-                                )}
-                            </div>
+                                </div>
+                            )}
                          </div>
                      )}
                  </div>
