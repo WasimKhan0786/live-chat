@@ -266,7 +266,12 @@ export default function RoomPage() {
       peer.on("stream", stream => {
           // Find name from peersRef because this is async stream event
           const p = peersRef.current.find(x => x.peerId === userToSignal);
-          setStreams(prev => [...prev, { peerId: userToSignal, stream, name: p?.name || "User" }]);
+          setStreams(prev => {
+              const existing = prev.find(s => s.peerId === userToSignal);
+              if (existing && existing.stream.id === stream.id) return prev; // Identical stream, skip
+              const others = prev.filter(s => s.peerId !== userToSignal);
+              return [...others, { peerId: userToSignal, stream, name: p?.name || "User" }];
+          });
       });
       return peer;
   }
@@ -278,7 +283,12 @@ export default function RoomPage() {
           socket.emit("signal", { to: incomingSignalId, from: callerId, signal, userName: userNameParam });
       });
       peer.on("stream", stream => {
-           setStreams(prev => [...prev, { peerId: incomingSignalId, stream, name: incomingName }]);
+           setStreams(prev => {
+               const existing = prev.find(s => s.peerId === incomingSignalId);
+               if (existing && existing.stream.id === stream.id) return prev;
+               const others = prev.filter(s => s.peerId !== incomingSignalId);
+               return [...others, { peerId: incomingSignalId, stream, name: incomingName }];
+           });
       });
       peer.signal(signal);
       return peer;
