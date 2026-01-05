@@ -35,6 +35,14 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
       console.log("Socket connected:", socket.id);
 
       socket.on("join-room", (roomId, userId, userName) => {
+        const room = io.sockets.adapter.rooms.get(roomId);
+        const numClients = room ? room.size : 0;
+        
+        if (numClients >= 4) {
+             socket.emit("room-full");
+             return;
+        }
+
         socket.join(roomId);
         // Broadcast both userId and userName
         socket.broadcast.to(roomId).emit("user-connected", userId, userName);

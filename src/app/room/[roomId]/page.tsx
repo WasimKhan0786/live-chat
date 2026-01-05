@@ -115,6 +115,12 @@ export default function RoomPage() {
           setActiveUrl(url);
           setWatchMode(!!url);
       });
+      
+      socket.on("room-full", () => {
+          alert("Room limit reached (Max 4 participants). You cannot join.");
+          window.location.href = '/';
+      });
+
     }).catch(err => console.error("Media Error:", err));
 
     return () => {
