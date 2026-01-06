@@ -18,6 +18,7 @@ import { LeaveRoomModal } from "@/components/modals/LeaveRoomModal";
 import { HostAdmissionModal } from "@/components/modals/HostAdmissionModal";
 import { GuestJoinModal } from "@/components/modals/GuestJoinModal";
 import { RoomCreatedModal } from "@/components/modals/RoomCreatedModal";
+import { RoomInactiveModal } from "@/components/modals/RoomInactiveModal";
 
 export default function RoomPage() {
   const params = useParams();
@@ -33,6 +34,7 @@ export default function RoomPage() {
   const [peers, setPeers] = useState<PeerData[]>([]);
   const [streams, setStreams] = useState<{peerId: string, stream: MediaStream, name: string}[]>([]);
   const [sessionId, setSessionId] = useState(""); // Store persistent session ID
+  const [isRoomInactive, setIsRoomInactive] = useState(false); // New State
 
   useEffect(() => {
       // Create/Retrieve persistent Session ID to handle refreshes
@@ -65,6 +67,7 @@ export default function RoomPage() {
   const [notifications, setNotifications] = useState<{id: string, senderName: string, text: string}[]>([]);
   const [peerFilters, setPeerFilters] = useState<Record<string, string>>({}); // Store remote filters
   const [showRoomParams, setShowRoomParams] = useState(true); // New state for room code modal
+  const [maximizedUser, setMaximizedUser] = useState<string | null>(null); // 'me' or peerId
   
   // Search Hook
   const { searchResults, isSearching, searchVideos, setSearchResults } = useYouTubeSearch();
@@ -284,6 +287,11 @@ export default function RoomPage() {
           window.location.href = '/';
       });
 
+      socket.on("room-inactive", () => {
+          setIsConnecting(false);
+          setIsRoomInactive(true); // Show new modal
+      });
+
       // INSTEAD of immediate join, we Request Access first
       setIsWaitingEntry(true);
       setIsConnecting(true); // START LOADING
@@ -300,7 +308,8 @@ export default function RoomPage() {
       // *Ideal fix*: In real app, use a ref to track this timeout and clear it in 'join-approved'.
       (socket as any)._connectTimeout = connectionTimeout;
 
-      socket.emit("request-join", room, socket.id, userName);
+      const actionParam = searchParams?.get('action');
+      socket.emit("request-join", room, socket.id, userName, sessionId, actionParam);
 
     }).catch(err => console.error("Media Error:", err));
 
@@ -318,6 +327,7 @@ export default function RoomPage() {
         socket.off("join-rejected");
         socket.off("kicked");
         socket.off("user-started-screen-share");
+        socket.off("room-inactive");
     }
   }, [socket, roomId, userName, sessionId, isConnected]); // Changed userNameParam to userName
 
@@ -511,7 +521,15 @@ export default function RoomPage() {
           stopScreenShare();
       } else {
           try {
-              const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+              if (!navigator.mediaDevices?.getDisplayMedia) {
+                  alert("Screen sharing is not supported on this device/browser.");
+                  return;
+              }
+
+              const screenStream = await navigator.mediaDevices.getDisplayMedia({ 
+                  video: true, 
+                  audio: false // Disable audio to improve mobile compatibility and prevent echo
+              });
               const screenTrack = screenStream.getVideoTracks()[0];
               
               screenTrack.onended = () => {
@@ -543,8 +561,13 @@ export default function RoomPage() {
               const room = Array.isArray(roomId) ? roomId[0] : (roomId || "");
               socket?.emit("start-screen-share", room);
 
-          } catch(e) {
+          } catch(e: any) {
               console.error("Screen share error", e);
+              if (e.name === 'NotAllowedError') {
+                   // User cancelled
+              } else {
+                   alert("Unable to start screen share. Please ensure you are on a supported browser (Chrome/Safari) and have granted permissions.");
+              }
           }
       }
   };
@@ -653,17 +676,22 @@ export default function RoomPage() {
                 </div>
             ) : (
                 <div className={cn(
-                    "grid gap-3 md:gap-4 w-full h-full content-center p-2 md:p-4 overflow-y-auto",
-                    (streams.length + 1) >= 3 ? "grid-cols-2 sm:grid-cols-2 lg:grid-cols-3" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 pl-12 pr-12 md:px-4"
+                    "grid gap-3 md:gap-4 w-full h-full content-center p-2 md:p-4 overflow-y-auto transition-all duration-500",
+                    // Dynamic Grid Layout Logic
+                    (streams.length + 1) <= 2 
+                        ? "grid-cols-1 md:grid-cols-2 max-w-4xl mx-auto" // 1-2 Users: Large Views (Stacked Mobile, Side-by-Side Desktop)
+                        : (streams.length + 1) === 3
+                            ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3" // 3 Users: Stacked/Grid Hybrid
+                            : "grid-cols-2 md:grid-cols-3 lg:grid-cols-4" // 4+ Users: Dense Grid
                 )}>
-                    <div className="aspect-video relative shadow-2xl rounded-2xl overflow-hidden border border-white/10">
-                        <VideoFeed stream={myStream} muted={true} isSelf={true} filter={currentFilter} name={userName || "You"} />
+                    <div className="aspect-video relative shadow-2xl rounded-2xl overflow-hidden border border-white/10" onClick={() => setMaximizedUser('me')}>
+                        <VideoFeed stream={myStream} muted={true} isSelf={true} filter={currentFilter} name={userName || "You"} onVideoClickAction={() => setMaximizedUser('me')} />
                     </div>
                     {streams.map((s) => (
                         <div key={s.peerId} className="aspect-video relative shadow-2xl rounded-2xl overflow-hidden border border-white/10 group">
-                             <VideoFeed stream={s.stream} name={s.name} filter={peerFilters[s.peerId] || 'none'} />
+                             <VideoFeed stream={s.stream} name={s.name} filter={peerFilters[s.peerId] || 'none'} onVideoClickAction={() => setMaximizedUser(s.peerId)} />
                              {isHost && (
-                                 <button onClick={() => kickUser(s.peerId)} className="absolute top-2 right-2 p-1.5 bg-red-500/80 hover:bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition z-20" title="Remove User">
+                                 <button onClick={(e) => { e.stopPropagation(); kickUser(s.peerId); }} className="absolute top-2 right-2 p-1.5 bg-red-500/80 hover:bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition z-20" title="Remove User">
                                      <X className="w-4 h-4" />
                                  </button>
                              )}
@@ -672,113 +700,113 @@ export default function RoomPage() {
                 </div>
             )}
             
+            {/* FULL SCREEN OVERLAY */}
+            {maximizedUser && (
+                 <div 
+                    className="fixed inset-0 z-[100] bg-black flex items-center justify-center animate-in zoom-in-95 duration-300"
+                    onClick={() => setMaximizedUser(null)}
+                 >
+                    {/* Controls Hint */}
+                    <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/50 backdrop-blur px-4 py-2 rounded-full text-white/70 text-xs pointer-events-none z-20">
+                        Tap to Close • Double Tap to Zoom
+                    </div>
+
+                    <div 
+                        className="w-full h-full p-0 md:p-4 transition-transform duration-200 ease-out touch-none flex items-center justify-center"
+                        onClick={(e) => e.stopPropagation()} // Prevent closing when tapping video
+                    >
+                         {maximizedUser === 'me' ? (
+                             <div className="w-full h-full md:max-w-5xl md:max-h-[80vh] aspect-video relative rounded-none md:rounded-2xl overflow-hidden ring-1 ring-white/10 bg-zinc-900">
+                                <VideoFeed 
+                                    stream={myStream} 
+                                    muted={true} 
+                                    isSelf={true} 
+                                    filter={currentFilter} 
+                                    name={userName || "You"} 
+                                    onVideoClickAction={() => setMaximizedUser(null)}
+                                />
+                             </div>
+                         ) : (
+                             (() => {
+                                 const s = streams.find(s => s.peerId === maximizedUser);
+                                 if(!s) return null;
+                                 return (
+                                     <div className="w-full h-full md:max-w-5xl md:max-h-[80vh] aspect-video relative rounded-none md:rounded-2xl overflow-hidden ring-1 ring-white/10 bg-zinc-900">
+                                        <VideoFeed 
+                                            stream={s.stream} 
+                                            name={s.name} 
+                                            filter={peerFilters[s.peerId] || 'none'} 
+                                            onVideoClickAction={() => setMaximizedUser(null)}
+                                        />
+                                     </div>
+                                 )
+                             })()
+                         )}
+                    </div>
+                 </div>
+            )}
+            
             {watchMode && (
                  <div className="absolute bottom-24 left-4 right-4 h-32 flex gap-2 overflow-x-auto p-2 no-scrollbar pointer-events-auto z-10">
                     <div className="h-full aspect-video min-w-[160px] relative shadow-lg ring-1 ring-white/10 rounded-lg overflow-hidden">
-                        <VideoFeed stream={myStream} muted={true} isSelf={true} filter={currentFilter} name={userName || "You"} />
+                        <VideoFeed stream={myStream} muted={true} isSelf={true} filter={currentFilter} name={userName || "You"} onVideoClickAction={() => setMaximizedUser('me')} />
                     </div>
                     {streams.map((s) => (
                         <div key={s.peerId} className="h-full aspect-video min-w-[160px] relative shadow-lg ring-1 ring-white/10 rounded-lg overflow-hidden">
-                             <VideoFeed stream={s.stream} name={s.name} />
+                             <VideoFeed stream={s.stream} name={s.name} onVideoClickAction={() => setMaximizedUser(s.peerId)} />
                         </div>
                     ))}
                  </div>
             )}
          </div>
 
-         <div className="h-16 md:h-20 bg-[#1a1a24]/90 backdrop-blur-md border-t border-white/10 flex items-center justify-between md:justify-center px-2 md:px-4 relative z-20 shrink-0 safe-pb">
-             <div className="flex items-center justify-center gap-1 sm:gap-2">
-                 <button onClick={toggleMute} className={cn("p-2 md:p-4 rounded-full transition flex-shrink-0", muted ? "bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/20" : "bg-white/10 hover:bg-white/20")}>
-                    {muted ? <MicOff className="w-4 h-4 md:w-5 md:h-5"/> : <Mic className="w-4 h-4 md:w-5 md:h-5"/>}
+         <div className="h-16 md:h-20 bg-[#1a1a24]/90 backdrop-blur-md border-t border-white/10 flex items-center justify-between md:justify-center px-4 relative z-20 shrink-0 safe-pb">
+             
+             {/* Mobile: 5 Primary Icons Evenly Spaced */}
+             <div className="flex md:hidden items-center justify-between w-full">
+                 <button onClick={toggleMute} className={cn("p-3 rounded-full transition", muted ? "bg-red-500 text-white shadow-lg shadow-red-500/20" : "bg-white/10 text-white")}>
+                    {muted ? <MicOff className="w-5 h-5"/> : <Mic className="w-5 h-5"/>}
                  </button>
-                 <button onClick={toggleVideo} className={cn("p-2 md:p-4 rounded-full transition flex-shrink-0", videoOff ? "bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/20" : "bg-white/10 hover:bg-white/20")}>
-                    {videoOff ? <VideoOff className="w-4 h-4 md:w-5 md:h-5"/> : <Video className="w-4 h-4 md:w-5 md:h-5"/>}
+                 <button onClick={toggleVideo} className={cn("p-3 rounded-full transition", videoOff ? "bg-red-500 text-white shadow-lg shadow-red-500/20" : "bg-white/10 text-white")}>
+                    {videoOff ? <VideoOff className="w-5 h-5"/> : <Video className="w-5 h-5"/>}
                  </button>
-
-                 <button onClick={toggleCamera} className="p-2 md:p-4 rounded-full bg-white/10 hover:bg-white/20 transition flex-shrink-0">
-                    <RefreshCw className="w-4 h-4 md:w-5 md:h-5"/>
+                 <button onClick={toggleCamera} className="p-3 rounded-full bg-white/10 text-white">
+                    <RefreshCw className="w-5 h-5"/>
                  </button>
-                 
-                 {/* Screen Share */}
-                 <button onClick={toggleScreenShare} className={cn("p-2 md:p-4 rounded-full transition flex-shrink-0", isScreenSharing ? "bg-primary shadow-lg" : "bg-white/10 hover:bg-white/20")}>
-                    <Monitor className="w-4 h-4 md:w-5 md:h-5"/>
+                 <button onClick={toggleScreenShare} className={cn("p-3 rounded-full transition", isScreenSharing ? "bg-primary text-white shadow-lg" : "bg-white/10 text-white")}>
+                    <Monitor className="w-5 h-5"/>
+                 </button>
+                 <button onClick={leaveRoom} className="p-3 rounded-full bg-red-500 text-white shadow-lg shadow-red-500/20">
+                    <PhoneOff className="w-5 h-5"/>
                  </button>
              </div>
 
-             <div className="flex items-center justify-center gap-1 sm:gap-2">
-                  {/* Watch Party Input Popover */}
+             {/* Desktop: Centered Unified Bar */}
+             <div className="hidden md:flex items-center justify-center gap-3">
+                 <button onClick={toggleMute} className={cn("p-4 rounded-full transition", muted ? "bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/20" : "bg-white/10 hover:bg-white/20")}>
+                    {muted ? <MicOff className="w-5 h-5"/> : <Mic className="w-5 h-5"/>}
+                 </button>
+                 <button onClick={toggleVideo} className={cn("p-4 rounded-full transition", videoOff ? "bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/20" : "bg-white/10 hover:bg-white/20")}>
+                    {videoOff ? <VideoOff className="w-5 h-5"/> : <Video className="w-5 h-5"/>}
+                 </button>
+                 <button onClick={toggleCamera} className="p-4 rounded-full bg-white/10 hover:bg-white/20">
+                    <RefreshCw className="w-5 h-5"/>
+                 </button>
+                 <button onClick={toggleScreenShare} className={cn("p-4 rounded-full transition", isScreenSharing ? "bg-primary shadow-lg" : "bg-white/10 hover:bg-white/20")}>
+                    <Monitor className="w-5 h-5"/>
+                 </button>
+                 
+                 <div className="h-8 w-px bg-white/10 mx-2" />
 
+                 {/* Desktop: Secondary Tools */}
+                 <button onClick={() => setIsBrowserOpen(!isBrowserOpen)} className={cn("p-4 rounded-full transition", isBrowserOpen ? "bg-blue-600 shadow-lg" : "bg-white/10 hover:bg-white/20")}>
+                    <Globe className="w-5 h-5"/>
+                 </button>
 
-                 {/* Mini Browser Button */}
-                <div className="relative">
-                    <button 
-                    onClick={() => {
-                        if (!isBrowserOpen) {
-                            setIsWatchOpen(false);
-                            setIsFilterOpen(false);
-                            setIsVoiceMenuOpen(false);
-                            setIsChatOpen(false);
-                        }
-                        setIsBrowserOpen(!isBrowserOpen);
-                    }}
-                    className={cn("p-2 md:p-4 rounded-full transition flex-shrink-0", isBrowserOpen ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30" : "bg-white/10 hover:bg-white/20")}
-                    >
-                        <Globe className="w-4 h-4 md:w-5 md:h-5"/>
-                    </button>
-                </div>
-                
-                {/* Mini Browser Window */}
-                {isBrowserOpen && (
-                    <div className="fixed top-24 left-1/2 -translate-x-1/2 w-[90%] md:w-[600px] h-[60vh] bg-[#1a1a24] border border-white/10 rounded-xl shadow-2xl z-50 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 resize-y">
-                        <div className="bg-black/40 p-3 flex items-center gap-3 border-b border-white/5 cursor-move active:cursor-grabbing">
-                            <div className="p-1.5 bg-blue-500/20 rounded-md">
-                            <Globe className="w-4 h-4 text-blue-400"/>
-                            </div>
-                            <div className="flex flex-col">
-                                <span className="text-xs font-bold text-white tracking-wide">SHARED BROWSER</span>
-                                <span className="text-[10px] text-muted-foreground">Synced with everyone in room</span>
-                            </div>
-                            <div className="flex-1"/>
-                            <button onClick={() => setIsBrowserOpen(false)} className="hover:text-red-400 p-1 hover:bg-white/5 rounded transition"><X className="w-4 h-4"/></button>
-                        </div>
-                        
-                        <form onSubmit={handleBrowserNavigate} className="p-2 bg-black/20 flex gap-2 border-b border-white/5">
-                            <div className="flex-1 relative flex items-center">
-                            <Search className="w-3 h-3 text-muted-foreground absolute left-3"/>
-                            <input 
-                                className="w-full bg-black/40 border border-white/10 rounded-full pl-8 pr-4 py-2 text-xs md:text-sm text-white outline-none focus:border-blue-500/50 transition placeholder:text-muted-foreground/50"
-                                placeholder="Search Wikipedia..."
-                                value={tempBrowserUrl}
-                                onChange={(e) => setTempBrowserUrl(e.target.value)}
-                            />
-                            <p className="text-[10px] text-muted-foreground mt-1 ml-3">
-                                *Note: Most sites (Google/YouTube) block external viewing. Wikipedia is supported.
-                            </p>
-                            </div>
-                            <button type="submit" className="bg-blue-600 hover:bg-blue-700 px-4 rounded-full text-xs font-bold text-white transition">
-                                GO
-                            </button>
-                        </form>
-                        
-                        <div className="flex-1 bg-white relative">
-                            <iframe 
-                                src={browserUrl} 
-                                className="w-full h-full border-0"
-                                sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                                referrerPolicy="no-referrer"
-                            />
-                        </div>
-                    </div>
-                )}
-
-                 {/* Filter Button */}
                  <div className="relative">
-                      <button 
-                        onClick={() => setIsFilterOpen(!isFilterOpen)} 
-                        className={cn("p-2 md:p-4 rounded-full transition flex-shrink-0", (currentFilter !== 'none' || isFilterOpen) ? "bg-purple-600 text-white shadow-lg shadow-purple-500/30" : "bg-white/10 hover:bg-white/20")}
-                      >
-                         <Wand2 className="w-4 h-4 md:w-5 md:h-5"/>
-                      </button>
+                     <button onClick={() => setIsFilterOpen(!isFilterOpen)} className={cn("p-4 rounded-full transition", isFilterOpen ? "bg-purple-600 shadow-lg" : "bg-white/10 hover:bg-white/20")}>
+                        <Wand2 className="w-5 h-5"/>
+                     </button>
                       {isFilterOpen && (
                           <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-64 bg-[#1a1a24] border border-white/10 p-3 rounded-xl shadow-2xl grid grid-cols-2 gap-2 z-50 max-h-[60vh] overflow-y-auto">
                                {['none', 'smooth', 'vivid', 'bw', 'sepia', 'vintage', 'cyber', 'cool', 'warm', 'dim', 'invert'].map(f => (
@@ -794,14 +822,10 @@ export default function RoomPage() {
                       )}
                  </div>
 
-                 {/* Voice Changer Button */}
                  <div className="relative">
-                      <button 
-                        onClick={() => setIsVoiceMenuOpen(!isVoiceMenuOpen)} 
-                        className={cn("p-2 md:p-4 rounded-full transition flex-shrink-0", voiceEffect !== 'none' ? "bg-pink-600 text-white shadow-lg shadow-pink-500/30" : "bg-white/10 hover:bg-white/20")}
-                      >
-                         <Mic2 className="w-4 h-4 md:w-5 md:h-5"/>
-                      </button>
+                     <button onClick={() => setIsVoiceMenuOpen(!isVoiceMenuOpen)} className={cn("p-4 rounded-full transition", isVoiceMenuOpen ? "bg-pink-600 shadow-lg" : "bg-white/10 hover:bg-white/20")}>
+                        <Mic2 className="w-5 h-5"/>
+                     </button>
                       {isVoiceMenuOpen && (
                           <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-40 bg-[#1a1a24] border border-white/10 p-2 rounded-xl shadow-2xl flex flex-col gap-1 z-50">
                                <div className="px-2 py-1 text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Voice FX</div>
@@ -829,19 +853,125 @@ export default function RoomPage() {
                       )}
                  </div>
 
-                 <button onClick={() => setIsChatOpen(true)} className="p-2 md:p-4 rounded-full bg-white/10 hover:bg-white/20 transition flex-shrink-0 relative">
-                    <MessageSquare className="w-4 h-4 md:w-5 md:h-5"/>
-                    {notifications.length > 0 && (
-                        <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border border-[#1a1a24] animate-bounce"/>
-                    )}
+                 <button onClick={() => setIsChatOpen(true)} className="p-4 rounded-full bg-white/10 hover:bg-white/20 relative">
+                    <MessageSquare className="w-5 h-5"/>
+                    {notifications.length > 0 && <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full animate-bounce"/>}
                  </button>
-                 
-                 {/* Leave Button */}
-                 <button onClick={leaveRoom} className="p-2 md:p-4 rounded-full bg-red-500/80 hover:bg-red-600 text-white transition flex-shrink-0 shadow-lg shadow-red-500/20">
+
+                 <div className="h-8 w-px bg-white/10 mx-2" />
+
+                 <button onClick={leaveRoom} className="p-4 rounded-full bg-red-500 hover:bg-red-600 text-white shadow-lg">
                     <PhoneOff className="w-5 h-5"/>
                  </button>
              </div>
          </div>
+      </div>
+      
+      {/* --- Mobile Floating Tools (Top Right) --- */}
+      <div className="md:hidden absolute top-20 right-4 z-40 flex flex-col gap-3 pointer-events-auto">
+           {/* Chat */}
+           <button onClick={() => setIsChatOpen(true)} className="p-3 rounded-full bg-black/60 backdrop-blur border border-white/10 text-white shadow-lg relative">
+               <MessageSquare className="w-5 h-5"/>
+               {notifications.length > 0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"/>}
+           </button>
+           
+           {/* Browser */}
+           <button onClick={() => setIsBrowserOpen(!isBrowserOpen)} className={cn("p-3 rounded-full backdrop-blur border border-white/10 shadow-lg transition", isBrowserOpen ? "bg-blue-600 text-white" : "bg-black/60 text-white")}>
+               <Globe className="w-5 h-5"/>
+           </button>
+
+           {/* Magic/Filters */}
+           <div className="relative">
+                <button onClick={() => setIsFilterOpen(!isFilterOpen)} className={cn("p-3 rounded-full backdrop-blur border border-white/10 shadow-lg transition", isFilterOpen ? "bg-purple-600 text-white" : "bg-black/60 text-white")}>
+                    <Wand2 className="w-5 h-5"/>
+                </button>
+                {/* Mobile Filter Menu */}
+                {isFilterOpen && (
+                    <div className="absolute right-full top-0 mr-2 w-32 bg-black/90 border border-white/10 p-2 rounded-xl shadow-2xl flex flex-col gap-1 max-h-[50vh] overflow-y-auto">
+                        {['none', 'smooth', 'vivid', 'bw', 'sepia', 'vintage', 'cyber'].map(f => (
+                           <button key={f} onClick={() => applyFilter(f)} className={cn("px-2 py-2 text-xs rounded text-left capitalize", currentFilter === f ? "bg-purple-500" : "hover:bg-white/10")}>{f}</button>
+                        ))}
+                    </div>
+                )}
+           </div>
+
+           {/* Voice FX */}
+            <div className="relative">
+                <button onClick={() => setIsVoiceMenuOpen(!isVoiceMenuOpen)} className={cn("p-3 rounded-full backdrop-blur border border-white/10 shadow-lg transition", isVoiceMenuOpen ? "bg-pink-600 text-white" : "bg-black/60 text-white")}>
+                    <Mic2 className="w-5 h-5"/>
+                </button>
+                {/* Mobile Voice Menu */}
+                {isVoiceMenuOpen && (
+                    <div className="absolute right-full top-0 mr-2 w-32 bg-black/90 border border-white/10 p-2 rounded-xl shadow-2xl flex flex-col gap-1">
+                        {['none', 'man', 'woman', 'robot', 'echo'].map(v => (
+                           <button key={v} onClick={() => applyVoice(v)} className={cn("px-2 py-2 text-xs rounded text-left capitalize", voiceEffect === v ? "bg-pink-500" : "hover:bg-white/10")}>{v}</button>
+                        ))}
+                    </div>
+                )}
+           </div>
+      </div>
+
+      {/* Shared Modals/Drawers need to stay outside */}
+      {/* Also need to render the Desktop Popups for Browser/Filter which we removed from bottom bar block above */}
+      {/* We need to re-add the Browser Window logic somewhere global because it's shared */}
+      
+      {/* Re-inject Browser Window (Global) */}
+      {isBrowserOpen && (
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 w-[90%] md:w-[600px] h-[60vh] bg-[#1a1a24] border border-white/10 rounded-xl shadow-2xl z-[60] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 resize-y">
+            <div className="bg-black/40 p-3 flex items-center gap-3 border-b border-white/5 cursor-move active:cursor-grabbing">
+                <div className="p-1.5 bg-blue-500/20 rounded-md">
+                <Globe className="w-4 h-4 text-blue-400"/>
+                </div>
+                <div className="flex flex-col">
+                    <span className="text-xs font-bold text-white tracking-wide">SHARED BROWSER</span>
+                    <span className="text-[10px] text-muted-foreground">Synced with everyone in room</span>
+                </div>
+                <div className="flex-1"/>
+                <button onClick={() => setIsBrowserOpen(false)} className="hover:text-red-400 p-1 hover:bg-white/5 rounded transition"><X className="w-4 h-4"/></button>
+            </div>
+            
+            <form onSubmit={handleBrowserNavigate} className="p-2 bg-black/20 flex gap-2 border-b border-white/5">
+                <div className="flex-1 relative flex items-center">
+                <Search className="w-3 h-3 text-muted-foreground absolute left-3"/>
+                <input 
+                    className="w-full bg-black/40 border border-white/10 rounded-full pl-8 pr-4 py-2 text-xs md:text-sm text-white outline-none focus:border-blue-500/50 transition placeholder:text-muted-foreground/50"
+                    placeholder="Search Wikipedia..."
+                    value={tempBrowserUrl}
+                    onChange={(e) => setTempBrowserUrl(e.target.value)}
+                />
+                <p className="text-[10px] text-muted-foreground mt-1 ml-3">
+                    *Note: Most sites (Google/YouTube) block external viewing. Wikipedia is supported.
+                </p>
+                </div>
+                <button type="submit" className="bg-blue-600 hover:bg-blue-700 px-4 rounded-full text-xs font-bold text-white transition">
+                    GO
+                </button>
+            </form>
+            
+            <div className="flex-1 bg-white relative">
+                <iframe 
+                    src={browserUrl} 
+                    className="w-full h-full border-0"
+                    sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                    referrerPolicy="no-referrer"
+                />
+            </div>
+        </div>
+      )}
+
+      {/* Desktop Filter Popovers (Re-added for Desktop view) */}
+      <div className="hidden md:block">
+           {/* These need to be positioned relative to the buttons in the desktop bar. 
+               But since we hardcoded the bar above, we can't easily attach them without complex state.
+               Wait, previously they were children of the absolute/relative button container.
+               I removed those containers.
+               
+               Let's solve this by using ONE centralized overlay for Mobile/Desktop filters or using Fixed positioning for Desktop too.
+               
+               Actually, for simplicity in this One-Shot edit:
+               I will add the Desktop Popups right next to the new Desktop Bar buttons inside the `hidden md:flex` block above.
+               I will Modify the `ReplacementContent` to include them there.
+           */}
       </div>
       
       {/* Sidebars and Modals */}
@@ -879,6 +1009,8 @@ export default function RoomPage() {
           roomId={Array.isArray(roomId) ? roomId[0] : (roomId || "")}
           onShare={shareRoom}
       />
+
+      <RoomInactiveModal isOpen={isRoomInactive} />
 
       {/* Notifications Toast */}
       <div className="fixed top-20 right-4 z-[90] flex flex-col gap-2 pointer-events-none">

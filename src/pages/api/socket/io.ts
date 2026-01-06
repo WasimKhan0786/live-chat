@@ -44,17 +44,40 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
       console.log("Socket connected:", socket.id);
 
       // New Flow: Request to Join
-      socket.on("request-join", (roomId, userId, userName) => {
-          // If no host exists for this room, this user becomes the host immediately
+      // New Flow: Request to Join
+      socket.on("request-join", (roomId, userId, userName, sessionId, action) => {
+          // 1. Check if room exists
           if (!roomHosts.has(roomId)) {
-               socket.emit("join-approved", true); // true = isHost
+               // If room doesn't exist, ONLY allow if explicitly creating
+               if (action === 'create') {
+                   socket.emit("join-approved", true); // true = isHost
+                   return;
+               }
+               
+               // Otherwise, room is dead/inactive (e.g. following an old link)
+               socket.emit("room-inactive");
                return;
           }
 
-          // If host exists, notify them
-          const hostId = roomHosts.get(roomId);
-          if (hostId) {
-             io.to(hostId).emit("user-requested-join", { socketId: socket.id, userName });
+          const hostSocketId = roomHosts.get(roomId);
+
+          // 2. Refresh/Reconnection Check:
+          // If the *existing* host is actually ME (same Session ID), approve immediately.
+          // This happens when you refresh the page: server still thinks 'old socket' is host.
+          if (sessionId && roomSessions.has(roomId)) {
+              const roomSess = roomSessions.get(roomId);
+              const mappedSocketId = roomSess?.get(sessionId);
+              
+              if (mappedSocketId === hostSocketId) {
+                  console.log("Host re-connected (Refresh detected). Approving immediately.");
+                  socket.emit("join-approved", true); // Remain Host
+                  return;
+              }
+          }
+
+          // 3. Otherwise, ask the Host
+          if (hostSocketId) {
+             io.to(hostSocketId).emit("user-requested-join", { socketId: socket.id, userName });
           }
       });
 

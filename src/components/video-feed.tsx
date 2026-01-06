@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 
-export const VideoFeed = ({ stream, muted = false, isSelf = false, filter = "none", name = "User" }: { stream: MediaStream | null, muted?: boolean, isSelf?: boolean, filter?: string, name?: string }) => {
+export const VideoFeed = ({ stream, muted = false, isSelf = false, filter = "none", name = "User", onVideoClickAction }: { stream: MediaStream | null, muted?: boolean, isSelf?: boolean, filter?: string, name?: string, onVideoClickAction?: () => void }) => {
     const ref = useRef<HTMLVideoElement>(null);
     useEffect(() => {
         const videoEl = ref.current;
@@ -88,8 +88,9 @@ export const VideoFeed = ({ stream, muted = false, isSelf = false, filter = "non
 
     return (
         <div 
-            className="relative w-full h-full bg-zinc-900 rounded-xl shadow-lg border border-white/5 group transition-all duration-300 overflow-hidden"
+            className="relative w-full h-full bg-zinc-900 rounded-xl shadow-lg border border-white/5 group transition-all duration-300 overflow-hidden cursor-pointer active:scale-95 md:active:scale-100"
             onContextMenu={(e) => { e.preventDefault(); setShowMenu(true); }}
+            onClick={onVideoClickAction}
         >
              <video 
                 ref={ref} 

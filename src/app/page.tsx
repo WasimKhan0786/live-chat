@@ -44,7 +44,7 @@ export default function Home() {
     }
     
     // Pass name in query param
-    router.push(`/room/${id}?name=${encodeURIComponent(finalName)}`);
+    router.push(`/room/${id}?name=${encodeURIComponent(finalName)}&action=create`);
   };
 
   const joinRoom = async (e: React.FormEvent) => {
