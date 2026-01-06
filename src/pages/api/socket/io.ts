@@ -80,6 +80,10 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
            }
       });
 
+      socket.on("start-screen-share", (roomId) => {
+          socket.to(roomId).emit("user-started-screen-share", socket.id);
+      });
+
       socket.on("join-room", (roomId, userId, userName, sessionId) => {
         // userId is actually socket.id here from client
 

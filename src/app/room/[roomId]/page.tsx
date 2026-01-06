@@ -4,11 +4,20 @@ import React, { useEffect, useRef, useState } from "react";
 import { useSocket } from "@/components/providers/socket-provider";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import SimplePeer from "simple-peer";
-import { Mic, MicOff, Video, VideoOff, Monitor, Play, MessageSquare, PhoneOff, Copy, Share2, LayoutGrid, Globe, X, Search, Wand2, RefreshCw, Mic2, Users } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, Monitor, MessageSquare, PhoneOff, Copy, Share2, LayoutGrid, Globe, X, Search, Wand2, RefreshCw, Mic2, Users } from "lucide-react";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { VideoFeed } from "@/components/video-feed"; 
 import { VideoPlayer } from "@/components/video-player"; 
+import { useVoiceFX, PeerData } from "@/hooks/useVoiceFX";
+import { useYouTubeSearch } from "@/hooks/useYouTubeSearch";
 import { cn } from "@/lib/utils";
+
+import { ConnectingOverlay } from "@/components/modals/ConnectingOverlay";
+import { WaitingRoomOverlay } from "@/components/modals/WaitingRoomOverlay";
+import { LeaveRoomModal } from "@/components/modals/LeaveRoomModal";
+import { HostAdmissionModal } from "@/components/modals/HostAdmissionModal";
+import { GuestJoinModal } from "@/components/modals/GuestJoinModal";
+import { RoomCreatedModal } from "@/components/modals/RoomCreatedModal";
 
 export default function RoomPage() {
   const params = useParams();
@@ -21,7 +30,7 @@ export default function RoomPage() {
   const { socket, isConnected } = useSocket();
   
   const [myStream, setMyStream] = useState<MediaStream | null>(null);
-  const [peers, setPeers] = useState<{peerId: string, peer: SimplePeer.Instance, name: string}[]>([]);
+  const [peers, setPeers] = useState<PeerData[]>([]);
   const [streams, setStreams] = useState<{peerId: string, stream: MediaStream, name: string}[]>([]);
   const [sessionId, setSessionId] = useState(""); // Store persistent session ID
 
@@ -50,26 +59,26 @@ export default function RoomPage() {
   const [isWatchOpen, setIsWatchOpen] = useState(false); 
   const [elapsedTime, setElapsedTime] = useState(0); 
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false); 
-  const [voiceEffect, setVoiceEffect] = useState("none"); 
+  // const [voiceEffect, setVoiceEffect] = useState("none"); // Moved to Hook
   const [isVoiceMenuOpen, setIsVoiceMenuOpen] = useState(false);
-  const [hearMyself, setHearMyself] = useState(false); 
+  // const [hearMyself, setHearMyself] = useState(false); // Moved to Hook
   const [notifications, setNotifications] = useState<{id: string, senderName: string, text: string}[]>([]);
   const [peerFilters, setPeerFilters] = useState<Record<string, string>>({}); // Store remote filters
   const [showRoomParams, setShowRoomParams] = useState(true); // New state for room code modal
   
-  // Search State
-  const [searchResults, setSearchResults] = useState<{id: string, title: string, thumbnail: string, timestamp: string, author: string, url: string}[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
+  // Search Hook
+  const { searchResults, isSearching, searchVideos, setSearchResults } = useYouTubeSearch();
 
   // Host / Admin State
   const [isHost, setIsHost] = useState(false);
   const [isWaitingEntry, setIsWaitingEntry] = useState(false);
   const [joinRequests, setJoinRequests] = useState<{socketId: string, userName: string}[]>([]);
+  const [isConnecting, setIsConnecting] = useState(false); // Global connection loader
 
   // Mini Browser State
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
-  const [browserUrl, setBrowserUrl] = useState("https://www.google.com"); 
-  const [tempBrowserUrl, setTempBrowserUrl] = useState(""); 
+  const [browserUrl, setBrowserUrl] = useState("https://en.wikipedia.org/wiki/Main_Page"); 
+  const [tempBrowserUrl, setTempBrowserUrl] = useState("");
 
   const handleSearch = async () => {
       if(!watchUrl.trim()) return;
@@ -77,20 +86,7 @@ export default function RoomPage() {
           startWatchParty(); 
           return;
       }
-      
-      setIsSearching(true);
-      setSearchResults([]);
-      try {
-          const res = await fetch(`/api/youtube-search?q=${encodeURIComponent(watchUrl)}`);
-          const data = await res.json();
-          if(data.videos) {
-              setSearchResults(data.videos);
-          }
-      } catch(e) {
-          console.error("Search failed", e);
-      } finally {
-          setIsSearching(false);
-      }
+      await searchVideos(watchUrl);
   };
 
   useEffect(() => {
@@ -127,168 +123,14 @@ export default function RoomPage() {
         socket.off("user-update-filter", handleFilterUpdate);
     }
   }, [socket]);
-
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const originalAudioStreamRef = useRef<MediaStream | null>(null);
+ 
   const myStreamRef = useRef<MediaStream | null>(null); // Ref to track active stream for socket callbacks
-  const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
-  const processingNodeRef = useRef<AudioNode | null>(null);
-  const audioGraphRef = useRef<{ source: MediaStreamAudioSourceNode | null, nodes: AudioNode[] }>({ source: null, nodes: [] });
+  const peersRef = useRef<PeerData[]>([]);
+  const isScreenSharingRef = useRef(false);
+  const stopScreenShareRef = useRef<() => void>(() => {});
 
-  const applyVoice = (effect: string) => {
-      setVoiceEffect(effect);
-      setIsVoiceMenuOpen(false);
-
-      if(!myStream) return;
-      
-      // Initialize original stream ref if needed
-      if(!originalAudioStreamRef.current) {
-          const track = myStream.getAudioTracks()[0];
-          if(track) originalAudioStreamRef.current = new MediaStream([track]);
-      }
-      
-      // If NONE, revert to original track and bypass AudioContext
-      if (effect === 'none') {
-           const originalTrack = originalAudioStreamRef.current?.getAudioTracks()[0];
-           if (originalTrack) {
-                // Cleanup graph
-                if (audioGraphRef.current.source) {
-                    try { audioGraphRef.current.source.disconnect(); } catch(e) {}
-                }
-                audioGraphRef.current.nodes.forEach(n => {
-                    try { n.disconnect(); } catch(e) {}
-                });
-                audioGraphRef.current = { source: null, nodes: [] };
-
-                // Replace sender with original track
-                peersRef.current.forEach(p => {
-                        if(p.peer && !p.peer.destroyed) {
-                            const pc = (p.peer as any)._pc; 
-                            if (pc) {
-                                const senders = pc.getSenders();
-                                const audioSender = senders.find((s: RTCRtpSender) => s.track && s.track.kind === 'audio');
-                                if(audioSender) {
-                                    audioSender.replaceTrack(originalTrack).catch((e: any) => console.log("Replace Track Error", e));
-                                }
-                            }
-                        }
-                });
-           }
-           return;
-      }
-
-      if(!originalAudioStreamRef.current) return;
-
-      if(!audioContextRef.current) {
-          audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      }
-      const ctx = audioContextRef.current;
-      if (ctx.state === 'suspended') ctx.resume();
-
-      if(!audioDestinationRef.current) {
-           audioDestinationRef.current = ctx.createMediaStreamDestination();
-      }
-      const dest = audioDestinationRef.current;
-
-      // Cleanup previous graph
-      if (audioGraphRef.current.source) {
-          try { audioGraphRef.current.source.disconnect(); } catch(e) {}
-      }
-      audioGraphRef.current.nodes.forEach(n => {
-          try { n.disconnect(); } catch(e) {}
-      });
-      audioGraphRef.current.nodes = [];
-
-      const sourceStream = originalAudioStreamRef.current;
-      const source = ctx.createMediaStreamSource(sourceStream);
-      audioGraphRef.current.source = source;
-      
-      let finalOutput: AudioNode = source;
-
-      if(effect === 'man') {
-           const biquad = ctx.createBiquadFilter();
-           biquad.type = 'lowshelf';
-           biquad.frequency.value = 200;
-           biquad.gain.value = 15;
-           source.connect(biquad);
-           const compressor = ctx.createDynamicsCompressor();
-           biquad.connect(compressor);
-           finalOutput = compressor;
-           audioGraphRef.current.nodes.push(biquad, compressor);
-
-      } else if (effect === 'woman') {
-           const biquad = ctx.createBiquadFilter();
-           biquad.type = 'highshelf';
-           biquad.frequency.value = 2000;
-           biquad.gain.value = 15;
-           const biquad2 = ctx.createBiquadFilter();
-           biquad2.type = 'peaking';
-           biquad2.frequency.value = 1000;
-           biquad2.Q.value = 1;
-           biquad2.gain.value = 5;
-           source.connect(biquad);
-           biquad.connect(biquad2);
-           finalOutput = biquad2;
-           audioGraphRef.current.nodes.push(biquad, biquad2);
-
-      } else if (effect === 'robot') {
-           const osc = ctx.createOscillator();
-           osc.frequency.value = 50; 
-           osc.type = 'sawtooth';
-           osc.start();
-           const ringGain = ctx.createGain();
-           ringGain.gain.value = 0.0; 
-           source.connect(ringGain);
-           osc.connect(ringGain.gain);
-           finalOutput = ringGain;
-           audioGraphRef.current.nodes.push(osc, ringGain);
-
-      } else if (effect === 'echo') {
-           const delay = ctx.createDelay();
-           delay.delayTime.value = 0.2;
-           const feedback = ctx.createGain();
-           feedback.gain.value = 0.4;
-           source.connect(delay);
-           delay.connect(feedback);
-           feedback.connect(delay);
-           source.connect(dest);
-           delay.connect(dest);
-           audioGraphRef.current.nodes.push(delay, feedback);
-           finalOutput = null as any; 
-      }
-
-      if (finalOutput) {
-           finalOutput.connect(dest);
-      }
-
-      processingNodeRef.current = finalOutput || dest;
-
-      const newTrack = dest.stream.getAudioTracks()[0];
-      peersRef.current.forEach(p => {
-            if(p.peer && !p.peer.destroyed) {
-                const pc = (p.peer as any)._pc; 
-                if (pc) {
-                    const senders = pc.getSenders();
-                    const audioSender = senders.find((s: RTCRtpSender) => s.track && s.track.kind === 'audio');
-                    if(audioSender) {
-                        audioSender.replaceTrack(newTrack).catch((e: any) => console.log("Replace Track Error", e));
-                    }
-                }
-            }
-      });
-  };
-
-  const toggleHearMyself = () => {
-      const newState = !hearMyself;
-      setHearMyself(newState);
-      if (processingNodeRef.current && audioContextRef.current) {
-          if (newState) {
-              processingNodeRef.current.connect(audioContextRef.current.destination);
-          } else {
-              try { processingNodeRef.current.disconnect(audioContextRef.current.destination); } catch(e) {}
-          }
-      }
-  };
+  /* --- Voice FX Hook --- */
+  const { voiceEffect, hearMyself, applyVoice, toggleHearMyself } = useVoiceFX(myStream, peersRef);
 
   const formatTime = (seconds: number) => {
     const hrs = Math.floor(seconds / 3600);
@@ -303,7 +145,7 @@ export default function RoomPage() {
      return () => clearInterval(timer);
   }, []);
   
-  const peersRef = useRef<{peerId: string, peer: SimplePeer.Instance, name: string}[]>([]);
+
 
   useEffect(() => {
      if(userNameParam) {
@@ -400,8 +242,16 @@ export default function RoomPage() {
       });
       
       socket.on("room-full", () => {
+          setIsConnecting(false);
           alert("Room limit reached (Max 10 participants). You cannot join.");
           window.location.href = '/';
+      });
+
+      socket.on("user-started-screen-share", (userId: string) => {
+           if(userId !== socket.id && isScreenSharingRef.current) {
+               console.log("Only one screen share allowed. Stopping my share.");
+               stopScreenShareRef.current();
+           }
       });
 
       /* --- HOST / ADMIN EVENTS --- */
@@ -414,24 +264,42 @@ export default function RoomPage() {
       });
 
       socket.on("join-approved", (isNowHost: boolean) => {
+           clearTimeout((socket as any)._connectTimeout); // Clear safety timer
            setIsWaitingEntry(false);
+           setIsConnecting(false);
            if(isNowHost) setIsHost(true);
            // Proceed to join actual room
            socket.emit("join-room", room, socket.id, userName, sessionId);
       });
 
       socket.on("join-rejected", () => {
+          setIsConnecting(false);
           alert("The host has denied your request to join.");
           window.location.href = '/';
       });
 
       socket.on("kicked", () => {
+          setIsConnecting(false);
           alert("You have been removed from the room.");
           window.location.href = '/';
       });
 
       // INSTEAD of immediate join, we Request Access first
       setIsWaitingEntry(true);
+      setIsConnecting(true); // START LOADING
+      
+      // Safety Timeout: If not connected in 15 seconds, likely server issue or network block
+      const connectionTimeout = setTimeout(() => {
+          setIsConnecting(false);
+          alert("Connection timed out! 🕒\n\nPossible reasons:\n1. Server is waking up (Render Free Tier)\n2. Strict Network/Firewall\n\nPlease try refreshing the page.");
+          window.location.reload(); 
+      }, 15000);
+
+      // Store timeout ID to clear it later (using a temp property on socket or just rely on state)
+      // For simplicity in this functional component without extra refs, we'll optimistically emit.
+      // *Ideal fix*: In real app, use a ref to track this timeout and clear it in 'join-approved'.
+      (socket as any)._connectTimeout = connectionTimeout;
+
       socket.emit("request-join", room, socket.id, userName);
 
     }).catch(err => console.error("Media Error:", err));
@@ -449,17 +317,22 @@ export default function RoomPage() {
         socket.off("join-approved");
         socket.off("join-rejected");
         socket.off("kicked");
+        socket.off("user-started-screen-share");
     }
   }, [socket, roomId, userName, sessionId, isConnected]); // Changed userNameParam to userName
 
   function createPeer(userToSignal: string, callerId: string, stream: MediaStream) {
       const peer = new SimplePeer({ 
           initiator: true, 
-          trickle: false, 
+          trickle: true, 
           stream,
           config: { 
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' }, 
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' },
                 { urls: 'stun:global.stun.twilio.com:3478' }
             ] 
           }
@@ -482,11 +355,15 @@ export default function RoomPage() {
   function addPeer(incomingSignalId: string, callerId: string, signal: any, stream: MediaStream, incomingName: string) {
       const peer = new SimplePeer({ 
           initiator: false, 
-          trickle: false, 
+          trickle: true, 
           stream,
           config: { 
             iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun.l.google.com:19302' }, 
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' },
                 { urls: 'stun:global.stun.twilio.com:3478' }
             ] 
           }
@@ -584,9 +461,8 @@ export default function RoomPage() {
   useEffect(() => {
       const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
-                if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-                    audioContextRef.current.resume();
-                }
+                // AudioContext resume handled in useVoiceFX hook
+                
                 // Refresh video tracks if needed
                 if (myStream) {
                     const videoTrack = myStream.getVideoTracks()[0];
@@ -601,42 +477,75 @@ export default function RoomPage() {
       return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [myStream, videoOff]);
 
-  const toggleScreenShare = () => {
-      if (isScreenSharing) {
-          navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
-              const videoTrack = stream.getVideoTracks()[0];
-              if(myStream) {
-                   const sender = myStream.getVideoTracks()[0];
-                   sender.stop();
-                   myStream.removeTrack(sender);
-                   myStream.addTrack(videoTrack);
-                   
-                   peers.forEach(p => {
-                       p.peer.replaceTrack(sender, videoTrack, myStream!);
-                   });
-                   videoTrack.enabled = !videoOff; 
-              }
-              setIsScreenSharing(false);
-          });
-      } else {
-          navigator.mediaDevices.getDisplayMedia({ video: true }).then(screenStream => {
-               const screenTrack = screenStream.getVideoTracks()[0];
-               
-               screenTrack.onended = () => {
-                   toggleScreenShare(); 
-               };
+  const stopScreenShare = async () => {
+       setIsScreenSharing(false);
+       isScreenSharingRef.current = false;
+       
+       try {
+           const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+           const videoTrack = stream.getVideoTracks()[0];
+           // Restore video state
+           videoTrack.enabled = !videoOff; 
 
-               if(myStream) {
-                   const sender = myStream.getVideoTracks()[0];
-                   myStream.removeTrack(sender);
-                   myStream.addTrack(screenTrack);
-                   
-                   peers.forEach(p => {
-                       p.peer.replaceTrack(sender, screenTrack, myStream!);
-                   });
-               }
-               setIsScreenSharing(true);
-          });
+           const currentStream = myStreamRef.current;
+           if(currentStream) {
+               const sender = currentStream.getVideoTracks()[0];
+               sender.stop();
+               currentStream.removeTrack(sender);
+               currentStream.addTrack(videoTrack);
+               
+               peersRef.current.forEach(p => {
+                   if(p.peer) {
+                       p.peer.replaceTrack(sender, videoTrack, currentStream);
+                   }
+               });
+           }
+       } catch(e) {
+           console.error("Failed to restore camera", e);
+       }
+  };
+  stopScreenShareRef.current = stopScreenShare;
+
+  const toggleScreenShare = async () => {
+      if (isScreenSharing) {
+          stopScreenShare();
+      } else {
+          try {
+              const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+              const screenTrack = screenStream.getVideoTracks()[0];
+              
+              screenTrack.onended = () => {
+                   if(isScreenSharingRef.current) stopScreenShare();
+              };
+
+              const currentStream = myStreamRef.current;
+              if(currentStream) {
+                  const sender = currentStream.getVideoTracks()[0];
+                  // Do not stop the sender track here, just remove it from stream to keep context? 
+                  // If we don't stop it, camera light stays on. 
+                  // But existing code didn't stop it. 
+                  // I'll stick to removing it. If user wants camera off they can toggle video.
+                  // Update: Actually safe to just remove.
+                  
+                  currentStream.removeTrack(sender);
+                  currentStream.addTrack(screenTrack);
+                  
+                  peersRef.current.forEach(p => {
+                      if(p.peer) {
+                          p.peer.replaceTrack(sender, screenTrack, currentStream);
+                      }
+                  });
+              }
+              setIsScreenSharing(true);
+              isScreenSharingRef.current = true;
+              
+              // Emit event
+              const room = Array.isArray(roomId) ? roomId[0] : (roomId || "");
+              socket?.emit("start-screen-share", room);
+
+          } catch(e) {
+              console.error("Screen share error", e);
+          }
       }
   };
 
@@ -644,7 +553,8 @@ export default function RoomPage() {
       e?.preventDefault();
       let url = tempBrowserUrl;
       if (!url.startsWith('http')) {
-           url = `https://www.google.com/search?q=${encodeURIComponent(url)}`;
+           // Google/Bing block iframes. Using Wikipedia as it is embeddable.
+           url = `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(url)}`;
       }
       setBrowserUrl(url);
       socket?.emit("browser-update", url, Array.isArray(roomId) ? roomId[0] : (roomId || ""));
@@ -733,11 +643,7 @@ export default function RoomPage() {
                  </span>
              </div>
 
-            <div className="pointer-events-auto">
-               <button onClick={() => setWatchMode(!watchMode)} className={cn("p-2 rounded-full backdrop-blur transition", watchMode ? "bg-primary text-white" : "bg-white/10 hover:bg-white/20")}>
-                  {watchMode ? <LayoutGrid className="w-5 h-5"/> : <Play className="w-5 h-5"/>}
-               </button>
-            </div>
+
          </div>
          
          <div className="flex-1 p-4 flex items-center justify-center overflow-auto">
@@ -801,109 +707,7 @@ export default function RoomPage() {
 
              <div className="flex items-center justify-center gap-1 sm:gap-2">
                   {/* Watch Party Input Popover */}
-                 <div className="relative">
-                      <button 
-                        onClick={() => setIsWatchOpen(!isWatchOpen)}
-                        className={cn("p-2 md:p-4 rounded-full transition flex-shrink-0", isWatchOpen || watchMode ? "bg-primary text-white" : "bg-white/10 hover:bg-white/20")}
-                      >
-                         <Play className="w-4 h-4 md:w-5 md:h-5"/>
-                      </button>
-                     {isWatchOpen && (
-                         <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-80 md:w-96 bg-[#1a1a24] border border-white/10 p-4 rounded-xl shadow-2xl z-50 flex flex-col max-h-[60vh] overflow-hidden">
-                            <label className="text-sm font-medium mb-3 flex justify-between items-center shrink-0">
-                                <span>{activeUrl ? "Current Watch Party" : "Start Watch Party"}</span>
-                                <span className="text-[10px] text-muted-foreground font-normal bg-white/5 px-1.5 py-0.5 rounded">Syncs for everyone</span>
-                            </label>
-                            
-                            {/* Search Input */}
-                            <div className="flex flex-col gap-3 shrink-0">
-                                <div className="flex gap-2">
-                                    <input 
-                                        className="bg-black/40 border border-white/10 rounded px-2 py-2 flex-1 text-xs md:text-sm outline-none placeholder:text-muted-foreground/50 focus:border-primary/50 transition" 
-                                        placeholder="Paste Link OR Type to Search..." 
-                                        value={watchUrl}
-                                        onChange={e => setWatchUrl(e.target.value)}
-                                        onKeyDown={(e) => {
-                                            if(e.key === 'Enter') {
-                                                if(watchUrl.startsWith('http')) {
-                                                    startWatchParty();
-                                                    setIsWatchOpen(false);
-                                                } else {
-                                                    handleSearch();
-                                                }
-                                            }
-                                        }}
-                                    />
-                                    {watchUrl.startsWith('http') || watchUrl.includes('youtube.com') || watchUrl.includes('youtu.be') ? (
-                                        <button 
-                                            onClick={() => { startWatchParty(); setIsWatchOpen(false); }} 
-                                            className="bg-primary hover:bg-primary/90 text-xs md:text-sm px-4 py-2 rounded font-medium transition flex items-center gap-1"
-                                        >
-                                            Play
-                                        </button>
-                                    ) : (
-                                        <button 
-                                            onClick={handleSearch} 
-                                            disabled={isSearching}
-                                            className="bg-white/10 hover:bg-white/20 text-xs md:text-sm px-3 py-2 rounded font-medium transition whitespace-nowrap min-w-[80px] flex items-center justify-center"
-                                        >
-                                            {isSearching ? <span className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"/> : "Search"}
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
 
-                            {/* Results List */}
-                            {searchResults.length > 0 && (
-                                <div className="mt-3 flex flex-col gap-2 overflow-y-auto pr-1 custom-scrollbar">
-                                    <h4 className="text-[10px] uppercase font-bold text-muted-foreground sticky top-0 bg-[#1a1a24] py-1">Search Results</h4>
-                                    {searchResults.map((video) => (
-                                        <button 
-                                            key={video.id}
-                                            onClick={() => {
-                                                setWatchUrl(video.url);
-                                                setActiveUrl(video.url);
-                                                setWatchMode(true);
-                                                socket?.emit("watch-mode-update", video.url, Array.isArray(roomId) ? roomId[0] : (roomId || ""));
-                                                setIsWatchOpen(false);
-                                                setSearchResults([]);
-                                            }}
-                                            className="flex gap-2 p-2 hover:bg-white/5 rounded-lg transition text-left group"
-                                        >
-                                            <div className="relative w-20 aspect-video bg-black rounded overflow-hidden shrink-0">
-                                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                                <img src={video.thumbnail} alt={video.title} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition" />
-                                                <span className="absolute bottom-0.5 right-0.5 bg-black/80 text-[8px] px-1 rounded text-white">{video.timestamp}</span>
-                                            </div>
-                                            <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                                <h5 className="text-xs font-medium text-white line-clamp-2 leading-tight group-hover:text-primary transition">{video.title}</h5>
-                                                <p className="text-[10px] text-muted-foreground">{video.author}</p>
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-
-                            {activeUrl && (
-                                <div className="mt-3 pt-3 border-t border-white/10 shrink-0">
-                                    <button 
-                                        onClick={() => { 
-                                            setActiveUrl(""); 
-                                            setWatchMode(false); 
-                                            setWatchUrl("");
-                                            setSearchResults([]);
-                                            socket?.emit("watch-mode-update", "", Array.isArray(roomId) ? roomId[0] : (roomId || "")); 
-                                            setIsWatchOpen(false);
-                                        }} 
-                                        className="w-full bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/30 text-xs py-2 rounded transition"
-                                    >
-                                        Stop Watching
-                                    </button>
-                                </div>
-                            )}
-                         </div>
-                     )}
-                 </div>
 
                  {/* Mini Browser Button */}
                 <div className="relative">
@@ -943,10 +747,13 @@ export default function RoomPage() {
                             <Search className="w-3 h-3 text-muted-foreground absolute left-3"/>
                             <input 
                                 className="w-full bg-black/40 border border-white/10 rounded-full pl-8 pr-4 py-2 text-xs md:text-sm text-white outline-none focus:border-blue-500/50 transition placeholder:text-muted-foreground/50"
-                                placeholder="Search Google or type URL to browse together..."
+                                placeholder="Search Wikipedia..."
                                 value={tempBrowserUrl}
                                 onChange={(e) => setTempBrowserUrl(e.target.value)}
                             />
+                            <p className="text-[10px] text-muted-foreground mt-1 ml-3">
+                                *Note: Most sites (Google/YouTube) block external viewing. Wikipedia is supported.
+                            </p>
                             </div>
                             <button type="submit" className="bg-blue-600 hover:bg-blue-700 px-4 rounded-full text-xs font-bold text-white transition">
                                 GO
@@ -1045,130 +852,33 @@ export default function RoomPage() {
         userName={userName}
       />
 
-      {isLeaveModalOpen && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-              <div className="bg-[#1a1a24] border border-white/10 p-6 rounded-2xl max-w-sm w-full shadow-2xl animate-in zoom-in-95">
-                  <h3 className="text-lg font-bold text-white mb-2">Leave the room?</h3>
-                  <p className="text-muted-foreground text-sm mb-6">You will be disconnected from the call and return to the home page.</p>
-                  <div className="flex gap-3">
-                      <button onClick={() => setIsLeaveModalOpen(false)} className="flex-1 bg-white/5 hover:bg-white/10 py-2.5 rounded-xl font-medium transition">Cancel</button>
-                      <button onClick={confirmLeave} className="flex-1 bg-red-500 hover:bg-red-600 py-2.5 rounded-xl font-medium transition text-white shadow-lg shadow-red-500/20">Leave Room</button>
-                  </div>
-              </div>
-          </div>
-      )}
+      <LeaveRoomModal 
+          isOpen={isLeaveModalOpen} 
+          onClose={() => setIsLeaveModalOpen(false)} 
+          onConfirm={confirmLeave} 
+      />
 
-      {/* Waiting Room Overlay */}
-      {isWaitingEntry && (
-           <div className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[200] flex items-center justify-center p-4">
-               <div className="flex flex-col items-center gap-4 animate-pulse">
-                   <div className="w-16 h-16 rounded-full border-4 border-t-primary border-r-transparent border-b-transparent border-l-transparent animate-spin"/>
-                   <h2 className="text-2xl font-bold text-white">Waiting for Host...</h2>
-                   <p className="text-white/50 text-sm">The host has been notified of your arrival.</p>
-               </div>
-           </div>
-      )}
+      <WaitingRoomOverlay isWaiting={isWaitingEntry} isConnecting={isConnecting} />
 
-      {/* Host Admission Modal */}
-      {joinRequests.length > 0 && isHost && (
-          <div className="fixed top-24 right-4 z-[150] w-80 bg-[#1a1a24] border border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in slide-in-from-right-10">
-               <div className="bg-primary/20 p-3 border-b border-white/5 flex items-center gap-2">
-                   <Users className="w-4 h-4 text-primary"/>
-                   <span className="font-bold text-sm text-white">Entry Requests ({joinRequests.length})</span>
-               </div>
-               <div className="divide-y divide-white/5 max-h-60 overflow-y-auto">
-                   {joinRequests.map(req => (
-                       <div key={req.socketId} className="p-3 flex items-center justify-between gap-2">
-                           <div className="flex flex-col min-w-0">
-                               <span className="font-medium text-white text-sm truncate">{req.userName}</span>
-                               <span className="text-[10px] text-muted-foreground">wants to join</span>
-                           </div>
-                           <div className="flex gap-1">
-                               <button onClick={() => handleAdminDecision(req.socketId, false)} className="p-1.5 hover:bg-red-500/20 text-red-400 rounded transition"><X className="w-4 h-4"/></button>
-                               <button onClick={() => handleAdminDecision(req.socketId, true)} className="p-1.5 hover:bg-green-500/20 text-green-400 rounded transition"><div className="w-4 h-4 rounded-full border-2 border-green-400"/></button>
-                           </div>
-                       </div>
-                   ))}
-               </div>
-          </div>
-      )}
+      <ConnectingOverlay isConnecting={isConnecting} />
 
-      {/* Guest Join Modal - Triggered if no userName */}
-      {!userName && (
-          <div className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[200] flex items-center justify-center p-4">
-               <div className="w-full max-w-md bg-[#1a1a24] border border-white/10 p-8 rounded-3xl shadow-2xl flex flex-col gap-6 items-center text-center animate-in zoom-in-95 duration-500">
-                    <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-2 ring-1 ring-primary/20">
-                        <Users className="w-10 h-10 text-primary" />
-                    </div>
-                    
-                    <div className="space-y-2">
-                        <h2 className="text-3xl font-bold text-white tracking-tight">Join Room</h2>
-                        <p className="text-white/40">Please enter your name to join the call.</p>
-                    </div>
+      <HostAdmissionModal 
+          isHost={isHost} 
+          joinRequests={joinRequests} 
+          onDecision={handleAdminDecision} 
+      />
 
-                    <form 
-                        onSubmit={(e) => {
-                            e.preventDefault();
-                            const formData = new FormData(e.currentTarget);
-                            const name = formData.get('guestName') as string;
-                            if(name?.trim()) {
-                                setUserName(name.trim());
-                            }
-                        }}
-                        className="w-full space-y-4"
-                    >
-                        <div className="space-y-2 text-left">
-                            <label className="text-xs uppercase tracking-wider font-bold text-white/40 ml-1">Display Name</label>
-                            <input 
-                                name="guestName"
-                                autoFocus
-                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-lg text-white outline-none focus:ring-2 focus:ring-primary/50 transition placeholder:text-white/10"
-                                placeholder="ex. Alex"
-                            />
-                        </div>
-                        <button type="submit" className="w-full bg-primary hover:bg-primary/90 text-white font-bold py-4 rounded-xl transition shadow-xl shadow-primary/20 text-lg">
-                            Join Meeting
-                        </button>
-                    </form>
-               </div>
-          </div>
-      )}
+      <GuestJoinModal 
+          isOpen={!userName} 
+          onSubmit={setUserName} 
+      />
 
-      {/* Room Code Welcome Modal */}
-      {showRoomParams && userName && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-            <div className="bg-[#1a1a24] border border-white/10 p-6 rounded-2xl max-w-sm w-full shadow-2xl animate-in zoom-in-95 relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500"/>
-                <button onClick={() => setShowRoomParams(false)} className="absolute top-4 right-4 text-white/50 hover:text-white transition"><X className="w-5 h-5"/></button>
-                
-                <div className="flex flex-col items-center text-center gap-4 pt-2">
-                    <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-2">
-                        <Share2 className="w-8 h-8 text-primary animate-pulse"/>
-                    </div>
-                    
-                    <div>
-                        <h3 className="text-xl font-bold text-white mb-1">Room Created!</h3>
-                        <p className="text-muted-foreground text-sm">Share this code with your friends to invite them.</p>
-                    </div>
-
-                    <div className="w-full bg-black/40 border border-white/10 rounded-xl p-4 flex items-center justify-between gap-3 group cursor-pointer hover:border-primary/50 transition" onClick={() => {
-                        shareRoom(); // Use the existing share logic which handles clipboard/native share
-                    }}>
-                        <code className="text-xs font-mono font-bold tracking-wider text-white break-all">
-                            {typeof window !== 'undefined' ? window.location.href : roomId}
-                        </code>
-                        <div className="p-2 bg-white/10 rounded-lg group-hover:bg-primary group-hover:text-white transition">
-                            <Copy className="w-5 h-5"/>
-                        </div>
-                    </div>
-
-                    <button onClick={() => setShowRoomParams(false)} className="w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-xl transition shadow-lg shadow-primary/25 mt-2">
-                        Got it, let's go!
-                    </button>
-                </div>
-            </div>
-        </div>
-      )}
+      <RoomCreatedModal 
+          isOpen={showRoomParams && !!userName} 
+          onClose={() => setShowRoomParams(false)}
+          roomId={Array.isArray(roomId) ? roomId[0] : (roomId || "")}
+          onShare={shareRoom}
+      />
 
       {/* Notifications Toast */}
       <div className="fixed top-20 right-4 z-[90] flex flex-col gap-2 pointer-events-none">
