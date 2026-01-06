@@ -62,106 +62,116 @@ export const VideoFeed = ({ stream, muted = false, isSelf = false, filter = "non
         }
     };
 
-    const [zoom, setZoom] = useState(1); // Video Zoom (Internal)
-    const [size, setSize] = useState(1); // Container Size (Visual scale)
-    const [showControls, setShowControls] = useState(false);
-    const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const [fit, setFit] = useState<'cover' | 'contain'>('cover');
+    const [resolution, setResolution] = useState<'hd' | 'sd'>('hd');
+    const [showMenu, setShowMenu] = useState(false);
 
-    const handleStart = () => {
-        longPressTimerRef.current = setTimeout(() => {
-            setShowControls(true);
-        }, 500); // 500ms long press
-    };
+    // Dynamic resolution control (Self only)
+    const setVideoQuality = async (quality: 'hd' | 'sd') => {
+        if (!isSelf || !stream) return;
+        
+        const track = stream.getVideoTracks()[0];
+        if (!track) return;
 
-    const handleEnd = () => {
-        if (longPressTimerRef.current) {
-            clearTimeout(longPressTimerRef.current);
+        const constraints = quality === 'hd' 
+            ? { width: { ideal: 1280 }, height: { ideal: 720 } }
+            : { width: { ideal: 640 }, height: { ideal: 480 } };
+
+        try {
+            await track.applyConstraints(constraints);
+            setResolution(quality);
+            setShowMenu(false);
+        } catch (e) {
+            console.error("Resolution change failed", e);
         }
     };
 
     return (
         <div 
-            className="relative w-full h-full bg-zinc-900 rounded-xl shadow-lg border border-white/5 group transition-all duration-300 z-0 hover:z-20"
-            style={{ transform: `scale(${size})`, transformOrigin: 'center' }}
-            onMouseDown={handleStart}
-            onMouseUp={handleEnd}
-            onMouseLeave={handleEnd}
-            onTouchStart={handleStart}
-            onTouchEnd={handleEnd}
-            onContextMenu={(e) => { e.preventDefault(); setShowControls(true); }} // Right click to open
+            className="relative w-full h-full bg-zinc-900 rounded-xl shadow-lg border border-white/5 group transition-all duration-300 overflow-hidden"
+            onContextMenu={(e) => { e.preventDefault(); setShowMenu(true); }}
         >
              <video 
                 ref={ref} 
                 autoPlay 
                 playsInline 
                 muted={muted} 
-                className={`w-full h-full object-cover transition-transform duration-200 ${isSelf ? 'scale-x-[-1]' : ''}`}
+                className={`w-full h-full transition-all duration-300 ${isSelf ? 'scale-x-[-1]' : ''}`}
                 style={{
-                    ...getFilterStyle(filter), // Apply filter to everyone
-                    transform: `${isSelf ? 'scaleX(-1)' : ''} scale(${zoom})` // Combine mirror and zoom
+                    ...getFilterStyle(filter),
+                    objectFit: fit
                 }}
             />
             
             {/* Name Badge */}
-            <div className={`absolute bottom-2 left-2 bg-black/50 px-2 py-1 rounded text-xs text-white transition pointer-events-none ${showControls ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'}`}>
-                {isSelf ? "You (" + name + ")" : name}
+            <div className={`absolute bottom-2 left-2 bg-black/50 backdrop-blur-md px-2.5 py-1 rounded-lg text-xs font-medium text-white transition pointer-events-none z-10 ${showMenu ? 'opacity-0' : 'opacity-100'}`}>
+                {isSelf ? "You" : name}
             </div>
 
-            {/* Filter Badge */}
-            {filter !== 'none' && (
-                 <div className={`absolute top-2 right-2 bg-primary/80 backdrop-blur px-2 py-0.5 rounded-full text-[10px] text-white ${showControls ? 'opacity-0' : ''}`}>
-                     {filter}
-                 </div>
-            )}
+            {/* Status Badges */}
+            <div className={`absolute top-2 right-2 flex gap-1 ${showMenu ? 'opacity-0' : ''}`}>
+                 {filter !== 'none' && (
+                     <div className="bg-primary/80 backdrop-blur px-2 py-0.5 rounded-full text-[10px] text-white">
+                         {filter}
+                     </div>
+                 )}
+                 {resolution === 'sd' && isSelf && (
+                     <div className="bg-yellow-500/80 backdrop-blur px-2 py-0.5 rounded-full text-[10px] text-white font-bold">
+                         SD
+                     </div>
+                 )}
+            </div>
 
-            {/* Customization Overlay */}
-            {showControls && (
-                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col items-center justify-center gap-4 p-4 animate-in fade-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex justify-between w-full items-center mb-2">
-                        <span className="text-xs font-bold text-white uppercase tracking-wider">Customize View</span>
-                        <button onClick={() => setShowControls(false)} className="text-white/50 hover:text-white"><X className="w-4 h-4"/></button>
-                    </div>
-
-                    {/* Zoom Slider */}
-                    <div className="w-full space-y-1">
-                        <div className="flex justify-between text-[10px] text-muted-foreground">
-                            <span>Zoom</span>
-                            <span>{Math.round(zoom * 100)}%</span>
+            {/* Context Menu Overlay */}
+            {showMenu && (
+                <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center p-4 animate-in fade-in zoom-in-95" onClick={() => setShowMenu(false)}>
+                    <div className="bg-[#1a1a24] border border-white/10 rounded-xl p-4 w-full max-w-[200px] shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+                        
+                        <div className="flex justify-between items-center border-b border-white/10 pb-2">
+                            <span className="text-xs font-bold text-white uppercase tracking-wider">Settings</span>
+                            <button onClick={() => setShowMenu(false)}><X className="w-4 h-4 text-white/50 hover:text-white"/></button>
                         </div>
-                        <input 
-                            type="range" 
-                            min="1" 
-                            max="3" 
-                            step="0.1" 
-                            value={zoom} 
-                            onChange={(e) => setZoom(parseFloat(e.target.value))}
-                            className="w-full h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer accent-primary"
-                        />
-                    </div>
 
-                    {/* Size Slider */}
-                    <div className="w-full space-y-1">
-                        <div className="flex justify-between text-[10px] text-muted-foreground">
-                            <span>Size</span>
-                            <span>{Math.round(size * 100)}%</span>
+                        {/* Ratio Control */}
+                        <div className="space-y-2">
+                            <span className="text-[10px] text-muted-foreground font-bold uppercase">Frame Ratio</span>
+                            <div className="grid grid-cols-2 gap-2">
+                                <button 
+                                    onClick={() => setFit('cover')}
+                                    className={`px-3 py-2 rounded-lg text-xs font-medium transition border ${fit === 'cover' ? 'bg-primary border-primary text-white' : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'}`}
+                                >
+                                    Crop
+                                </button>
+                                <button 
+                                    onClick={() => setFit('contain')}
+                                    className={`px-3 py-2 rounded-lg text-xs font-medium transition border ${fit === 'contain' ? 'bg-primary border-primary text-white' : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'}`}
+                                >
+                                    Fit
+                                </button>
+                            </div>
                         </div>
-                        <input 
-                            type="range" 
-                            min="0.5" 
-                            max="1.5" 
-                            step="0.1" 
-                            value={size} 
-                            onChange={(e) => setSize(parseFloat(e.target.value))}
-                            className="w-full h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer accent-blue-500"
-                        />
-                    </div>
 
-                    <button 
-                        onClick={() => { setZoom(1); setSize(1); }}
-                        className="mt-2 text-[10px] bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full text-white transition"
-                    >
-                        Reset All
-                    </button>
+                        {/* Resolution Control (Self Only) */}
+                        {isSelf && (
+                            <div className="space-y-2">
+                                <span className="text-[10px] text-muted-foreground font-bold uppercase">Resolution</span>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button 
+                                        onClick={() => setVideoQuality('hd')}
+                                        className={`px-3 py-2 rounded-lg text-xs font-medium transition border ${resolution === 'hd' ? 'bg-green-600 border-green-600 text-white' : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'}`}
+                                    >
+                                        HD
+                                    </button>
+                                    <button 
+                                        onClick={() => setVideoQuality('sd')}
+                                        className={`px-3 py-2 rounded-lg text-xs font-medium transition border ${resolution === 'sd' ? 'bg-yellow-600 border-yellow-600 text-white' : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'}`}
+                                    >
+                                        SD
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
         </div>

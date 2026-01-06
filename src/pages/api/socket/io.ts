@@ -18,6 +18,7 @@ export const config = {
 
 const roomIPs = new Map<string, Map<string, string>>(); // roomId -> SocketID -> SocketID (Keep for capacity count)
 const roomSessions = new Map<string, Map<string, string>>(); // roomId -> SessionID -> SocketID
+const roomHosts = new Map<string, string>(); // roomId -> HostSocketID
 
 // Helper to get IP
 const getIp = (socket: any) => {
@@ -41,6 +42,43 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
 
     io.on("connection", (socket) => {
       console.log("Socket connected:", socket.id);
+
+      // New Flow: Request to Join
+      socket.on("request-join", (roomId, userId, userName) => {
+          // If no host exists for this room, this user becomes the host immediately
+          if (!roomHosts.has(roomId)) {
+               socket.emit("join-approved", true); // true = isHost
+               return;
+          }
+
+          // If host exists, notify them
+          const hostId = roomHosts.get(roomId);
+          if (hostId) {
+             io.to(hostId).emit("user-requested-join", { socketId: socket.id, userName });
+          }
+      });
+
+      socket.on("admin-decision", (targetSocketId, approved, roomId) => {
+          if (approved) {
+              io.to(targetSocketId).emit("join-approved", false);
+          } else {
+              io.to(targetSocketId).emit("join-rejected");
+          }
+      });
+
+      socket.on("kick-user", (targetSocketId, roomId) => {
+           // Verify if sender is host
+           if (roomHosts.get(roomId) === socket.id) {
+                io.to(targetSocketId).emit("kicked");
+                io.in(roomId).emit("user-disconnected", targetSocketId);
+                
+                const targetSocket = io.sockets.sockets.get(targetSocketId);
+                if (targetSocket) {
+                    targetSocket.leave(roomId);
+                    targetSocket.disconnect(true);
+                }
+           }
+      });
 
       socket.on("join-room", (roomId, userId, userName, sessionId) => {
         // userId is actually socket.id here from client
@@ -98,6 +136,14 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
         // Broadcast both userId and userName
         socket.broadcast.to(roomId).emit("user-connected", userId, userName);
         
+        // Host Management
+        if (!roomHosts.has(roomId)) {
+             roomHosts.set(roomId, socket.id);
+             socket.emit("host-update", true); // You are host
+        } else {
+             socket.emit("host-update", false);
+        }
+        
         socket.on("disconnect", () => {
              // Cleanup Maps
              const map = roomIPs.get(roomId);
@@ -113,6 +159,20 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
              }
 
              socket.broadcast.to(roomId).emit("user-disconnected", userId);
+             
+             // Host Left Handling
+             if (roomHosts.get(roomId) === socket.id) {
+                 roomHosts.delete(roomId);
+                 // Assign new host if anyone is left
+                 const remaining = roomIPs.get(roomId);
+                 if (remaining && remaining.size > 0) {
+                      const firstKey = remaining.keys().next().value;
+                      if(firstKey) {
+                          roomHosts.set(roomId, firstKey);
+                          io.to(firstKey).emit("host-update", true);
+                      }
+                 }
+             }
         });
       });
 

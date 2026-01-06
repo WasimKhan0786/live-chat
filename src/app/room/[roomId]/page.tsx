@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useSocket } from "@/components/providers/socket-provider";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import SimplePeer from "simple-peer";
-import { Mic, MicOff, Video, VideoOff, Monitor, Play, MessageSquare, PhoneOff, Copy, Share2, LayoutGrid, Globe, X, Search, Wand2, RefreshCw, Mic2 } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, Monitor, Play, MessageSquare, PhoneOff, Copy, Share2, LayoutGrid, Globe, X, Search, Wand2, RefreshCw, Mic2, Users } from "lucide-react";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { VideoFeed } from "@/components/video-feed"; 
 import { VideoPlayer } from "@/components/video-player"; 
@@ -60,6 +60,11 @@ export default function RoomPage() {
   // Search State
   const [searchResults, setSearchResults] = useState<{id: string, title: string, thumbnail: string, timestamp: string, author: string, url: string}[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+
+  // Host / Admin State
+  const [isHost, setIsHost] = useState(false);
+  const [isWaitingEntry, setIsWaitingEntry] = useState(false);
+  const [joinRequests, setJoinRequests] = useState<{socketId: string, userName: string}[]>([]);
 
   // Mini Browser State
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
@@ -125,6 +130,7 @@ export default function RoomPage() {
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const originalAudioStreamRef = useRef<MediaStream | null>(null);
+  const myStreamRef = useRef<MediaStream | null>(null); // Ref to track active stream for socket callbacks
   const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const processingNodeRef = useRef<AudioNode | null>(null);
   const audioGraphRef = useRef<{ source: MediaStreamAudioSourceNode | null, nodes: AudioNode[] }>({ source: null, nodes: [] });
@@ -300,11 +306,16 @@ export default function RoomPage() {
   const peersRef = useRef<{peerId: string, peer: SimplePeer.Instance, name: string}[]>([]);
 
   useEffect(() => {
-     if(userNameParam) setUserName(userNameParam);
+     if(userNameParam) {
+         setUserName(userNameParam);
+     }
+     // logic removed: else { setUserName('Guest-...') } 
+     // We now want to KEEP userName empty to trigger the Join Modal
   }, [userNameParam]);
   
   useEffect(() => {
-    if(!socket || !isConnected || peersRef.current.length > 0 || !userNameParam) return; 
+    // Depend on userName state, not param
+    if(!socket || !isConnected || peersRef.current.length > 0 || !userName) return; 
     
     let isMounted = true;
 
@@ -342,14 +353,16 @@ export default function RoomPage() {
       // Start with Video ON by default to resolve "Black Screen" issues
       // stream.getVideoTracks().forEach(t => t.enabled = false); 
       setMyStream(stream);
+      myStreamRef.current = stream; // Keep ref in sync
 
       // Sanitize roomId to ensure string
       const room = Array.isArray(roomId) ? roomId[0] : (roomId || "");
 
-      socket.emit("join-room", room, socket.id, userNameParam, sessionId);
-      
+      // Setup Listeners BEFORE joining to avoid race conditions
       socket.on("user-connected", (userId: string, remoteUserName: string) => {
-         const peer = createPeer(userId, socket.id, stream);
+         // Use the CURRENT active stream, not the closure 'stream' which might be stale (e.g. after camera toggle)
+         const currentStream = myStreamRef.current || stream;
+         const peer = createPeer(userId, socket.id, currentStream);
          const name = remoteUserName || "User";
          peersRef.current.push({ peerId: userId, peer, name });
          setPeers((prev) => [...prev, { peerId: userId, peer, name }]);
@@ -361,7 +374,8 @@ export default function RoomPage() {
               item.peer.signal(data.signal);
           } else {
               const name = data.userName || "User";
-              const peer = addPeer(data.from, socket.id, data.signal, stream, name); 
+              const currentStream = myStreamRef.current || stream;
+              const peer = addPeer(data.from, socket.id, data.signal, currentStream, name); 
               peersRef.current.push({ peerId: data.from, peer, name });
               setPeers((prev) => [...prev, { peerId: data.from, peer, name }]);
           }
@@ -381,16 +395,44 @@ export default function RoomPage() {
           setWatchMode(!!url);
       });
 
-      // Handle Remote Mute/Video Toggles for UI updates if needed
       socket.on("user-toggle-audio", (userId: string, isMuted: boolean) => {
-           // We can update UI state here if we want to show a mute icon on peer
-           // For now, the stream track enabled/disabled mostly handles the AV
+           // Handler placeholder
       });
       
       socket.on("room-full", () => {
           alert("Room limit reached (Max 10 participants). You cannot join.");
           window.location.href = '/';
       });
+
+      /* --- HOST / ADMIN EVENTS --- */
+      socket.on("host-update", (isHost: boolean) => {
+          setIsHost(isHost);
+      });
+
+      socket.on("user-requested-join", (data: {socketId: string, userName: string}) => {
+          setJoinRequests(prev => [...prev, data]);
+      });
+
+      socket.on("join-approved", (isNowHost: boolean) => {
+           setIsWaitingEntry(false);
+           if(isNowHost) setIsHost(true);
+           // Proceed to join actual room
+           socket.emit("join-room", room, socket.id, userName, sessionId);
+      });
+
+      socket.on("join-rejected", () => {
+          alert("The host has denied your request to join.");
+          window.location.href = '/';
+      });
+
+      socket.on("kicked", () => {
+          alert("You have been removed from the room.");
+          window.location.href = '/';
+      });
+
+      // INSTEAD of immediate join, we Request Access first
+      setIsWaitingEntry(true);
+      socket.emit("request-join", room, socket.id, userName);
 
     }).catch(err => console.error("Media Error:", err));
 
@@ -400,9 +442,15 @@ export default function RoomPage() {
         socket.off("signal");
         socket.off("user-disconnected");
         socket.off("watch-mode-update");
-        socket.off("user-toggle-audio");
+        socket.off("user-toggle-audio"); 
+        socket.off("room-full");
+        socket.off("host-update");
+        socket.off("user-requested-join");
+        socket.off("join-approved");
+        socket.off("join-rejected");
+        socket.off("kicked");
     }
-  }, [socket, roomId, userNameParam, sessionId, isConnected]); // Added isConnected to deps
+  }, [socket, roomId, userName, sessionId, isConnected]); // Changed userNameParam to userName
 
   function createPeer(userToSignal: string, callerId: string, stream: MediaStream) {
       const peer = new SimplePeer({ 
@@ -512,6 +560,7 @@ export default function RoomPage() {
         }
 
         setMyStream(newStream);
+        myStreamRef.current = newStream; // Update Ref
 
         peersRef.current.forEach(p => {
              if(p.peer && !p.peer.destroyed) {
@@ -629,13 +678,52 @@ export default function RoomPage() {
       setIsFilterOpen(false);
   };
 
+  const kickUser = (peerId: string) => {
+      if(!isHost) return;
+      if(confirm("Are you sure you want to remove this user?")) {
+          socket?.emit("kick-user", peerId, Array.isArray(roomId) ? roomId[0] : (roomId || ""));
+      }
+  };
+
+  const handleAdminDecision = (socketId: string, approved: boolean) => {
+      setJoinRequests(prev => prev.filter(req => req.socketId !== socketId));
+      socket?.emit("admin-decision", socketId, approved, Array.isArray(roomId) ? roomId[0] : (roomId || ""));
+  };
+
+  const shareRoom = async () => {
+      const baseUrl = window.location.origin + window.location.pathname; 
+      const text = `Join my video room on ConnectLive!\n${baseUrl}`;
+       
+       if (navigator.share) {
+           try {
+               await navigator.share({
+                   title: 'Join Video Room',
+                   text: 'Join my video room on ConnectLive!',
+                   url: baseUrl
+               });
+           } catch (err) {
+               // User cancelled or failed
+           }
+       } else {
+           navigator.clipboard.writeText(text);
+           alert("Link copied to clipboard! Share it on WhatsApp."); 
+       }
+  };
+
   return (
     <div className="h-screen w-full bg-[#0c0c14] text-white flex overflow-hidden">
       <div className="flex-1 flex flex-col relative">
          <div className="absolute top-0 left-0 right-0 p-3 md:p-4 z-10 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
-            <div className="pointer-events-auto flex items-center gap-2 bg-white/10 backdrop-blur px-3 py-1.5 rounded-full">
-                <span className="text-sm font-mono opacity-70">ID: {roomId}</span>
-                <button onClick={copyId} className="hover:text-primary"><Copy className="w-4 h-4"/></button>
+            <div className="pointer-events-auto flex items-center gap-3">
+                 <button onClick={shareRoom} className="p-2 rounded-full bg-green-600/80 hover:bg-green-600 text-white backdrop-blur shadow-lg shadow-green-900/20 transition flex items-center gap-2 pr-4 pl-3">
+                     <Share2 className="w-4 h-4"/>
+                     <span className="text-xs font-bold">Invite</span>
+                 </button>
+                 
+                <div className="flex items-center gap-2 bg-white/10 backdrop-blur px-3 py-1.5 rounded-full">
+                    <span className="text-sm font-mono opacity-70">ID: {roomId}</span>
+                    <button onClick={copyId} className="hover:text-primary"><Copy className="w-4 h-4"/></button>
+                </div>
             </div>
             
              <div className="pointer-events-auto bg-red-500/20 backdrop-blur px-3 py-1 rounded-full border border-red-500/50">
@@ -666,8 +754,13 @@ export default function RoomPage() {
                         <VideoFeed stream={myStream} muted={true} isSelf={true} filter={currentFilter} name={userName || "You"} />
                     </div>
                     {streams.map((s) => (
-                        <div key={s.peerId} className="aspect-video relative shadow-2xl rounded-2xl overflow-hidden border border-white/10">
+                        <div key={s.peerId} className="aspect-video relative shadow-2xl rounded-2xl overflow-hidden border border-white/10 group">
                              <VideoFeed stream={s.stream} name={s.name} filter={peerFilters[s.peerId] || 'none'} />
+                             {isHost && (
+                                 <button onClick={() => kickUser(s.peerId)} className="absolute top-2 right-2 p-1.5 bg-red-500/80 hover:bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition z-20" title="Remove User">
+                                     <X className="w-4 h-4" />
+                                 </button>
+                             )}
                         </div>
                     ))}
                 </div>
@@ -701,7 +794,7 @@ export default function RoomPage() {
                  </button>
                  
                  {/* Screen Share */}
-                 <button onClick={toggleScreenShare} className={cn("hidden md:flex p-2 md:p-4 rounded-full transition flex-shrink-0", isScreenSharing ? "bg-primary shadow-lg" : "bg-white/10 hover:bg-white/20")}>
+                 <button onClick={toggleScreenShare} className={cn("p-2 md:p-4 rounded-full transition flex-shrink-0", isScreenSharing ? "bg-primary shadow-lg" : "bg-white/10 hover:bg-white/20")}>
                     <Monitor className="w-4 h-4 md:w-5 md:h-5"/>
                  </button>
              </div>
@@ -965,8 +1058,84 @@ export default function RoomPage() {
           </div>
       )}
 
+      {/* Waiting Room Overlay */}
+      {isWaitingEntry && (
+           <div className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[200] flex items-center justify-center p-4">
+               <div className="flex flex-col items-center gap-4 animate-pulse">
+                   <div className="w-16 h-16 rounded-full border-4 border-t-primary border-r-transparent border-b-transparent border-l-transparent animate-spin"/>
+                   <h2 className="text-2xl font-bold text-white">Waiting for Host...</h2>
+                   <p className="text-white/50 text-sm">The host has been notified of your arrival.</p>
+               </div>
+           </div>
+      )}
+
+      {/* Host Admission Modal */}
+      {joinRequests.length > 0 && isHost && (
+          <div className="fixed top-24 right-4 z-[150] w-80 bg-[#1a1a24] border border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in slide-in-from-right-10">
+               <div className="bg-primary/20 p-3 border-b border-white/5 flex items-center gap-2">
+                   <Users className="w-4 h-4 text-primary"/>
+                   <span className="font-bold text-sm text-white">Entry Requests ({joinRequests.length})</span>
+               </div>
+               <div className="divide-y divide-white/5 max-h-60 overflow-y-auto">
+                   {joinRequests.map(req => (
+                       <div key={req.socketId} className="p-3 flex items-center justify-between gap-2">
+                           <div className="flex flex-col min-w-0">
+                               <span className="font-medium text-white text-sm truncate">{req.userName}</span>
+                               <span className="text-[10px] text-muted-foreground">wants to join</span>
+                           </div>
+                           <div className="flex gap-1">
+                               <button onClick={() => handleAdminDecision(req.socketId, false)} className="p-1.5 hover:bg-red-500/20 text-red-400 rounded transition"><X className="w-4 h-4"/></button>
+                               <button onClick={() => handleAdminDecision(req.socketId, true)} className="p-1.5 hover:bg-green-500/20 text-green-400 rounded transition"><div className="w-4 h-4 rounded-full border-2 border-green-400"/></button>
+                           </div>
+                       </div>
+                   ))}
+               </div>
+          </div>
+      )}
+
+      {/* Guest Join Modal - Triggered if no userName */}
+      {!userName && (
+          <div className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[200] flex items-center justify-center p-4">
+               <div className="w-full max-w-md bg-[#1a1a24] border border-white/10 p-8 rounded-3xl shadow-2xl flex flex-col gap-6 items-center text-center animate-in zoom-in-95 duration-500">
+                    <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-2 ring-1 ring-primary/20">
+                        <Users className="w-10 h-10 text-primary" />
+                    </div>
+                    
+                    <div className="space-y-2">
+                        <h2 className="text-3xl font-bold text-white tracking-tight">Join Room</h2>
+                        <p className="text-white/40">Please enter your name to join the call.</p>
+                    </div>
+
+                    <form 
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            const formData = new FormData(e.currentTarget);
+                            const name = formData.get('guestName') as string;
+                            if(name?.trim()) {
+                                setUserName(name.trim());
+                            }
+                        }}
+                        className="w-full space-y-4"
+                    >
+                        <div className="space-y-2 text-left">
+                            <label className="text-xs uppercase tracking-wider font-bold text-white/40 ml-1">Display Name</label>
+                            <input 
+                                name="guestName"
+                                autoFocus
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-lg text-white outline-none focus:ring-2 focus:ring-primary/50 transition placeholder:text-white/10"
+                                placeholder="ex. Alex"
+                            />
+                        </div>
+                        <button type="submit" className="w-full bg-primary hover:bg-primary/90 text-white font-bold py-4 rounded-xl transition shadow-xl shadow-primary/20 text-lg">
+                            Join Meeting
+                        </button>
+                    </form>
+               </div>
+          </div>
+      )}
+
       {/* Room Code Welcome Modal */}
-      {showRoomParams && (
+      {showRoomParams && userName && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
             <div className="bg-[#1a1a24] border border-white/10 p-6 rounded-2xl max-w-sm w-full shadow-2xl animate-in zoom-in-95 relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500"/>
@@ -982,9 +1151,11 @@ export default function RoomPage() {
                         <p className="text-muted-foreground text-sm">Share this code with your friends to invite them.</p>
                     </div>
 
-                    <div className="w-full bg-black/40 border border-white/10 rounded-xl p-4 flex items-center justify-between gap-3 group cursor-pointer hover:border-primary/50 transition" onClick={copyId}>
-                        <code className="text-2xl font-mono font-bold tracking-wider text-white">
-                            {Array.isArray(roomId) ? roomId[0] : (roomId || "")}
+                    <div className="w-full bg-black/40 border border-white/10 rounded-xl p-4 flex items-center justify-between gap-3 group cursor-pointer hover:border-primary/50 transition" onClick={() => {
+                        shareRoom(); // Use the existing share logic which handles clipboard/native share
+                    }}>
+                        <code className="text-xs font-mono font-bold tracking-wider text-white break-all">
+                            {typeof window !== 'undefined' ? window.location.href : roomId}
                         </code>
                         <div className="p-2 bg-white/10 rounded-lg group-hover:bg-primary group-hover:text-white transition">
                             <Copy className="w-5 h-5"/>
