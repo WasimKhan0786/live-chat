@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 
-export const VideoFeed = ({ stream, muted = false, isSelf = false, filter = "none", name = "User", onVideoClickAction }: { stream: MediaStream | null, muted?: boolean, isSelf?: boolean, filter?: string, name?: string, onVideoClickAction?: () => void }) => {
+export const VideoFeed = ({ stream, muted = false, isSelf = false, filter = "none", name = "User", onVideoClickAction, initialFit = 'cover' }: { stream: MediaStream | null, muted?: boolean, isSelf?: boolean, filter?: string, name?: string, onVideoClickAction?: () => void, initialFit?: 'cover' | 'contain' }) => {
     const ref = useRef<HTMLVideoElement>(null);
     useEffect(() => {
         const videoEl = ref.current;
@@ -11,9 +11,9 @@ export const VideoFeed = ({ stream, muted = false, isSelf = false, filter = "non
         videoEl.srcObject = stream;
 
         const attemptPlay = () => {
-            if (videoEl.paused || videoEl.ended) {
-                videoEl.play().catch(e => console.log("Resume play failed", e));
-            }
+             if (videoEl.paused || videoEl.ended) {
+                 videoEl.play().catch(e => console.log("Resume play failed", e));
+             }
         };
 
         const onMetadata = () => attemptPlay();
@@ -62,7 +62,7 @@ export const VideoFeed = ({ stream, muted = false, isSelf = false, filter = "non
         }
     };
 
-    const [fit, setFit] = useState<'cover' | 'contain'>('cover');
+    const [fit, setFit] = useState<'cover' | 'contain'>(initialFit);
     const [resolution, setResolution] = useState<'hd' | 'sd'>('hd');
     const [showMenu, setShowMenu] = useState(false);
 

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useSocket } from "@/components/providers/socket-provider";
+import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import SimplePeer from "simple-peer";
 import { Mic, MicOff, Video, VideoOff, Monitor, MessageSquare, PhoneOff, Copy, Share2, LayoutGrid, Globe, X, Search, Wand2, RefreshCw, Mic2, Users } from "lucide-react";
@@ -707,41 +708,64 @@ export default function RoomPage() {
                     onClick={() => setMaximizedUser(null)}
                  >
                     {/* Controls Hint */}
-                    <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/50 backdrop-blur px-4 py-2 rounded-full text-white/70 text-xs pointer-events-none z-20">
-                        Tap to Close • Double Tap to Zoom
+                    <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/50 backdrop-blur px-4 py-2 rounded-full text-white/70 text-xs pointer-events-none z-20 whitespace-nowrap">
+                        Pinch to Zoom • Drag to Pan
                     </div>
+
+                    {/* Close Button - Crucial for mobile since tapping video no longer closes */}
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); setMaximizedUser(null); }}
+                        className="absolute top-4 right-4 p-2 bg-black/50 hover:bg-white/20 text-white rounded-full backdrop-blur z-50 transition"
+                    >
+                        <X className="w-6 h-6" />
+                    </button>
 
                     <div 
                         className="w-full h-full p-0 md:p-4 transition-transform duration-200 ease-out touch-none flex items-center justify-center"
-                        onClick={(e) => e.stopPropagation()} // Prevent closing when tapping video
+                        onClick={(e) => e.stopPropagation()} // Prevent closing when tapping area around video
                     >
-                         {maximizedUser === 'me' ? (
-                             <div className="w-full h-full md:max-w-5xl md:max-h-[80vh] aspect-video relative rounded-none md:rounded-2xl overflow-hidden ring-1 ring-white/10 bg-zinc-900">
-                                <VideoFeed 
-                                    stream={myStream} 
-                                    muted={true} 
-                                    isSelf={true} 
-                                    filter={currentFilter} 
-                                    name={userName || "You"} 
-                                    onVideoClickAction={() => setMaximizedUser(null)}
-                                />
-                             </div>
-                         ) : (
-                             (() => {
-                                 const s = streams.find(s => s.peerId === maximizedUser);
-                                 if(!s) return null;
-                                 return (
+                         <TransformWrapper
+                            initialScale={1}
+                            minScale={1}
+                            maxScale={4}
+                            centerOnInit={true}
+                            limitToBounds={true}
+                         >
+                            <TransformComponent 
+                                wrapperClass="!w-full !h-full flex items-center justify-center" 
+                                contentClass="!w-full !h-full"
+                            >
+                                 {maximizedUser === 'me' ? (
                                      <div className="w-full h-full md:max-w-5xl md:max-h-[80vh] aspect-video relative rounded-none md:rounded-2xl overflow-hidden ring-1 ring-white/10 bg-zinc-900">
                                         <VideoFeed 
-                                            stream={s.stream} 
-                                            name={s.name} 
-                                            filter={peerFilters[s.peerId] || 'none'} 
-                                            onVideoClickAction={() => setMaximizedUser(null)}
+                                            stream={myStream} 
+                                            muted={true} 
+                                            isSelf={true} 
+                                            filter={currentFilter} 
+                                            name={userName || "You"} 
+                                            initialFit="contain"
+                                            // onVideoClickAction removed to allow gestures without closing
                                         />
                                      </div>
-                                 )
-                             })()
-                         )}
+                                 ) : (
+                                     (() => {
+                                         const s = streams.find(s => s.peerId === maximizedUser);
+                                         if(!s) return null;
+                                         return (
+                                             <div className="w-full h-full md:max-w-5xl md:max-h-[80vh] aspect-video relative rounded-none md:rounded-2xl overflow-hidden ring-1 ring-white/10 bg-zinc-900">
+                                                <VideoFeed 
+                                                    stream={s.stream} 
+                                                    name={s.name} 
+                                                    filter={peerFilters[s.peerId] || 'none'} 
+                                                    initialFit="contain"
+                                                    // onVideoClickAction removed to allow gestures without closing
+                                                />
+                                             </div>
+                                         )
+                                     })()
+                                 )}
+                            </TransformComponent>
+                         </TransformWrapper>
                     </div>
                  </div>
             )}
