@@ -15,6 +15,8 @@ export const ChatSidebar = ({ roomId, isOpen, onClose, userName }: ChatSidebarPr
   const { socket } = useSocket();
   const [messages, setMessages] = useState<{ text: string; senderId: string; senderName: string }[]>([]);
   const [input, setInput] = useState("");
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,11 +32,27 @@ export const ChatSidebar = ({ roomId, isOpen, onClose, userName }: ChatSidebarPr
     };
 
     socket.on("receive-message", handleMessage);
-    // Remove "chat-message" listener if it was redundant or ensure parity
-    // Keeping logic simple: io.ts emits 'receive-message'
+
+    const handleTyping = (name: string, isTyping: boolean) => {
+        setTypingUsers(prev => {
+            if (isTyping) {
+                if (!prev.includes(name)) return [...prev, name];
+                return prev;
+            } else {
+                return prev.filter(n => n !== name);
+            }
+        });
+        // Auto scroll to show typing indicator if at bottom
+        if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+    };
+    
+    socket.on("user-typing", handleTyping);
 
     return () => {
       socket.off("receive-message", handleMessage);
+      socket.off("user-typing", handleTyping);
     };
   }, [socket]);
 
@@ -42,14 +60,27 @@ export const ChatSidebar = ({ roomId, isOpen, onClose, userName }: ChatSidebarPr
     e.preventDefault();
     if (!input.trim() || !socket) return;
 
-    const msgData = { text: input, senderId: socket.id, senderName: userName };
-    
-    // Optimistic update
-    // setMessages((prev) => [...prev, msgData]); // Actually better to wait for server echo to ensure order? 
-    // Usually io.to(roomId) includes sender. So we don't optimistic update to avoid double.
+    // Clear typing status immediately on send
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    socket.emit("typing-stop", roomId, userName);
 
+    const msgData = { text: input, senderId: socket.id, senderName: userName };
     socket.emit("send-message", msgData, roomId);
     setInput("");
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      setInput(e.target.value);
+      
+      if (!socket) return;
+
+      socket.emit("typing-start", roomId, userName);
+
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+      typingTimeoutRef.current = setTimeout(() => {
+          socket.emit("typing-stop", roomId, userName);
+      }, 2000);
   };
   
   return (
@@ -86,10 +117,16 @@ export const ChatSidebar = ({ roomId, isOpen, onClose, userName }: ChatSidebarPr
         })}
       </div>
 
+      {typingUsers.length > 0 && (
+          <div className="px-4 py-2 text-xs text-green-400 italic animate-pulse bg-white/5 backdrop-blur-md border-t border-white/5">
+              {typingUsers.join(", ")} {typingUsers.length > 1 ? "are" : "is"} typing...
+          </div>
+      )}
+
       <form onSubmit={sendMessage} className="p-2 border-t border-white/10 bg-white/5 rounded-b-2xl backdrop-blur-md flex gap-2">
         <input
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={handleInputChange}
           placeholder="Type a message..."
           className="flex-1 bg-black/20 border border-white/10 rounded-full px-3 py-1.5 text-xs md:text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-blue-500/50 transition"
         />

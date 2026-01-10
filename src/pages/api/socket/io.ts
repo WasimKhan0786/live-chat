@@ -229,7 +229,18 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIo) => {
         io.to(data.to).emit("signal", { signal: data.signal, from: data.from, userName: data.userName });
       });
       
-      // Filter Sync
+      
+      // Typing Indicators
+      socket.on("typing-start", (roomId, userName) => {
+          socket.broadcast.to(roomId).emit("user-typing", userName, true);
+      });
+
+      socket.on("typing-stop", (roomId, userName) => {
+          if(userName) {
+             socket.broadcast.to(roomId).emit("user-typing", userName, false);
+          }
+      }); 
+      
       socket.on("update-filter", (filter, roomId) => {
           socket.broadcast.to(roomId).emit("user-update-filter", socket.id, filter);
       });

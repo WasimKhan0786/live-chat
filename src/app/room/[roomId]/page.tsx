@@ -12,6 +12,7 @@ import { VideoPlayer } from "@/components/video-player";
 import { useVoiceFX, PeerData } from "@/hooks/useVoiceFX";
 import { useYouTubeSearch } from "@/hooks/useYouTubeSearch";
 import { cn } from "@/lib/utils";
+import { fetchIceServers, DEFAULT_ICE_SERVERS } from "@/lib/turn-config";
 
 import { ConnectingOverlay } from "@/components/modals/ConnectingOverlay";
 import { WaitingRoomOverlay } from "@/components/modals/WaitingRoomOverlay";
@@ -45,6 +46,16 @@ export default function RoomPage() {
           sessionStorage.setItem('user_session_id', sId);
       }
       setSessionId(sId);
+  }, []);
+
+  const iceServersRef = useRef<any[]>(DEFAULT_ICE_SERVERS);
+
+  useEffect(() => {
+      // Fetch dynamic TURN servers on mount
+      fetchIceServers().then(servers => {
+          iceServersRef.current = servers;
+          console.log("ICE Servers loaded:", servers.length);
+      });
   }, []);
 
 
@@ -349,14 +360,7 @@ export default function RoomPage() {
           trickle: true, 
           stream,
           config: { 
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' }, 
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' },
-                { urls: 'stun:global.stun.twilio.com:3478' }
-            ] 
+            iceServers: iceServersRef.current
           }
       });
       peer.on("signal", signal => {
@@ -380,14 +384,7 @@ export default function RoomPage() {
           trickle: true, 
           stream,
           config: { 
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' }, 
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' },
-                { urls: 'stun:global.stun.twilio.com:3478' }
-            ] 
+            iceServers: iceServersRef.current
           }
       });
       peer.on("signal", signal => {
